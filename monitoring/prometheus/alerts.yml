@@ -1,0 +1,99 @@
+# Alert rules for the Kafka cluster. Shared by Docker Compose and Kubernetes.
+# View firing alerts at http://localhost:9090/alerts
+groups:
+  - name: kafka-availability
+    rules:
+      - alert: KafkaBrokerDown
+        expr: up{job="kafka-broker"} == 0
+        for: 30s
+        labels:
+          severity: critical
+        annotations:
+          summary: "Broker {{ $labels.instance }} is down"
+          description: "Prometheus cannot scrape {{ $labels.instance }} for 30s. The cluster still serves traffic with 2/3 brokers, but has no spare capacity for another failure."
+
+      - alert: KafkaNoActiveController
+        expr: sum(kafka_controller_kafkacontroller_activecontrollercount) != 1
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "KRaft quorum has {{ $value }} active controllers (expected 1)"
+          description: "0 = quorum lost (metadata changes impossible), >1 = split brain."
+
+      - alert: KafkaOfflinePartitions
+        expr: sum(kafka_controller_kafkacontroller_offlinepartitionscount) > 0
+        for: 30s
+        labels:
+          severity: critical
+        annotations:
+          summary: "{{ $value }} partitions have no leader"
+          description: "Producers and consumers for these partitions are blocked."
+
+      - alert: KafkaUnderMinIsrPartitions
+        expr: sum(kafka_server_replicamanager_underminisrpartitioncount) > 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "{{ $value }} partitions are below min.insync.replicas"
+          description: "Producers using acks=all will get NotEnoughReplicas errors."
+
+      - alert: KafkaUnderReplicatedPartitions
+        expr: sum(kafka_server_replicamanager_underreplicatedpartitions) > 0
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $value }} under-replicated partitions"
+          description: "A broker is down or a follower cannot keep up with its leader."
+
+  - name: kafka-load
+    rules:
+      - alert: KafkaConsumerLagHigh
+        expr: sum by (consumergroup, topic) (kafka_consumergroup_lag) > 10000
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Consumer group {{ $labels.consumergroup }} lags {{ $value }} messages on {{ $labels.topic }}"
+          description: "Consumers cannot keep up. Scale the consumer (replicas <= partitions) or optimise processing."
+
+      - alert: KafkaConsumerLagGrowing
+        expr: |
+          deriv(sum by (consumergroup, topic) (kafka_consumergroup_lag)[5m:30s]) > 50
+          and sum by (consumergroup, topic) (kafka_consumergroup_lag) > 1000
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Lag of {{ $labels.consumergroup }} on {{ $labels.topic }} keeps growing"
+
+      - alert: KafkaRequestHandlerSaturated
+        expr: kafka_server_kafkarequesthandlerpool_requesthandleravgidlepercent < 0.2
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Broker {{ $labels.instance }} request handlers are >80% busy"
+          description: "The broker is near its CPU/IO limit. Add brokers or partitions, or reduce load."
+
+      - alert: KafkaProduceLatencyHigh
+        expr: kafka_network_requestmetrics_totaltimems{request="Produce", quantile="0.99"} > 500
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "p99 produce latency on {{ $labels.instance }} is {{ $value }}ms"
+
+      - alert: KafkaJvmHeapHigh
+        expr: |
+          (
+            sum by (instance) (jvm_memory_used_bytes{job="kafka-broker", area="heap"})
+            / sum by (instance) (jvm_memory_max_bytes{job="kafka-broker", area="heap"})
+          ) > 0.85
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Heap usage on {{ $labels.instance }} is {{ $value | humanizePercentage }}"

@@ -1,0 +1,104 @@
+# Prometheus JMX exporter rules for Kafka (KRaft, broker + controller).
+# Adapted from the upstream example: https://github.com/prometheus/jmx_exporter/tree/main/examples
+#
+# Notable metrics produced:
+#   kafka_server_brokertopicmetrics_messagesin_total{topic}
+#   kafka_server_brokertopicmetrics_bytesin_total{topic} / bytesout_total{topic}
+#   kafka_server_replicamanager_underreplicatedpartitions
+#   kafka_server_replicamanager_underminisrpartitioncount
+#   kafka_server_replicamanager_partitioncount / leadercount
+#   kafka_controller_kafkacontroller_activecontrollercount
+#   kafka_controller_kafkacontroller_offlinepartitionscount
+#   kafka_network_requestmetrics_totaltimems{request,quantile}
+#   kafka_server_kafkarequesthandlerpool_requesthandleravgidlepercent
+#   kafka_network_socketserver_networkprocessoravgidlepercent
+#   kafka_log_log_size{topic,partition}
+# JVM / process metrics (jvm_*, process_*) are exported automatically by the agent.
+lowercaseOutputName: true
+
+includeObjectNames:
+  - "kafka.server:*"
+  - "kafka.controller:*"
+  - "kafka.network:*"
+  - "kafka.log:type=Log,*"
+  - "kafka.coordinator.group:*"
+
+rules:
+  # Request handler pool idle ratio is a meter; the useful value is the rate (0..1).
+  - pattern: kafka.server<type=KafkaRequestHandlerPool, name=RequestHandlerAvgIdlePercent><>OneMinuteRate
+    name: kafka_server_kafkarequesthandlerpool_requesthandleravgidlepercent
+    type: GAUGE
+
+  # Per client / topic / partition gauges (e.g. fetcher lag)
+  - pattern: kafka.server<type=(.+), name=(.+), clientId=(.+), topic=(.+), partition=(.*)><>Value
+    name: kafka_server_$1_$2
+    type: GAUGE
+    labels:
+      clientId: "$3"
+      topic: "$4"
+      partition: "$5"
+  - pattern: kafka.server<type=(.+), name=(.+), clientId=(.+), brokerHost=(.+), brokerPort=(.+)><>Value
+    name: kafka_server_$1_$2
+    type: GAUGE
+    labels:
+      clientId: "$3"
+      broker: "$4:$5"
+
+  - pattern: kafka.coordinator.(\w+)<type=(.+), name=(.+)><>Value
+    name: kafka_coordinator_$1_$2_$3
+    type: GAUGE
+
+  # Per-second meters -> counters (0..2 extra key/value pairs)
+  - pattern: kafka.(\w+)<type=(.+), name=(.+)PerSec\w*, (.+)=(.+), (.+)=(.+)><>Count
+    name: kafka_$1_$2_$3_total
+    type: COUNTER
+    labels:
+      "$4": "$5"
+      "$6": "$7"
+  - pattern: kafka.(\w+)<type=(.+), name=(.+)PerSec\w*, (.+)=(.+)><>Count
+    name: kafka_$1_$2_$3_total
+    type: COUNTER
+    labels:
+      "$4": "$5"
+  - pattern: kafka.(\w+)<type=(.+), name=(.+)PerSec\w*><>Count
+    name: kafka_$1_$2_$3_total
+    type: COUNTER
+
+  # Gauges (0..2 extra key/value pairs)
+  - pattern: kafka.(\w+)<type=(.+), name=(.+), (.+)=(.+), (.+)=(.+)><>Value
+    name: kafka_$1_$2_$3
+    type: GAUGE
+    labels:
+      "$4": "$5"
+      "$6": "$7"
+  - pattern: kafka.(\w+)<type=(.+), name=(.+), (.+)=(.+)><>Value
+    name: kafka_$1_$2_$3
+    type: GAUGE
+    labels:
+      "$4": "$5"
+  - pattern: kafka.(\w+)<type=(.+), name=(.+)><>Value
+    name: kafka_$1_$2_$3
+    type: GAUGE
+
+  # Plain counters
+  - pattern: kafka.(\w+)<type=(.+), name=(.+), (.+)=(.+)><>Count
+    name: kafka_$1_$2_$3_count
+    type: COUNTER
+    labels:
+      "$4": "$5"
+  - pattern: kafka.(\w+)<type=(.+), name=(.+)><>Count
+    name: kafka_$1_$2_$3_count
+    type: COUNTER
+
+  # Histogram percentiles (request latency, ...)
+  - pattern: kafka.(\w+)<type=(.+), name=(.+), (.+)=(.*)><>(\d+)thPercentile
+    name: kafka_$1_$2_$3
+    type: GAUGE
+    labels:
+      "$4": "$5"
+      quantile: "0.$6"
+  - pattern: kafka.(\w+)<type=(.+), name=(.+)><>(\d+)thPercentile
+    name: kafka_$1_$2_$3
+    type: GAUGE
+    labels:
+      quantile: "0.$4"

@@ -1,0 +1,99 @@
+# Load generator running inside the cluster.
+#   kubectl apply -k k8s/apps
+#   kubectl -n kol-system scale deploy/loadgen-producer --replicas=3   # 3x the load
+#   kubectl -n kol-system set env deploy/loadgen-producer LOADGEN_RATE=5000
+#
+# loadgen-consumer also serves as a stand-in for the real stream consumer (Module 3)
+# to demonstrate auto-scaling: see loadgen-consumer-hpa.yaml and k8s/addons/keda/.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: loadgen-producer
+  labels:
+    app.kubernetes.io/name: loadgen-producer
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: loadgen-producer
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: loadgen-producer
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8000"
+        prometheus.io/job: loadgen
+    spec:
+      containers:
+        - name: loadgen
+          image: kol-loadgen:1.0.0
+          imagePullPolicy: IfNotPresent
+          args: ["produce"]
+          env:
+            - name: BOOTSTRAP_SERVERS
+              value: kafka:9092
+            - name: LOADGEN_TOPIC
+              value: kol.loadtest
+            - name: LOADGEN_RATE
+              value: "1000"
+            - name: LOADGEN_DURATION
+              value: "0"
+          ports:
+            - name: metrics
+              containerPort: 8000
+          resources:
+            requests:
+              cpu: 200m
+              memory: 128Mi
+            limits:
+              cpu: "1"
+              memory: 512Mi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: loadgen-consumer
+  labels:
+    app.kubernetes.io/name: loadgen-consumer
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: loadgen-consumer
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: loadgen-consumer
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8000"
+        prometheus.io/job: loadgen
+    spec:
+      containers:
+        - name: loadgen
+          image: kol-loadgen:1.0.0
+          imagePullPolicy: IfNotPresent
+          args: ["consume"]
+          env:
+            - name: BOOTSTRAP_SERVERS
+              value: kafka:9092
+            - name: LOADGEN_TOPIC
+              value: kol.loadtest
+            - name: LOADGEN_GROUP
+              value: loadgen-consumer
+            - name: LOADGEN_DURATION
+              value: "0"
+            # Simulated per-message work so one replica cannot keep up -> lag/CPU rise -> scale out
+            - name: LOADGEN_PROCESS_DELAY_MS
+              value: "0.5"
+          ports:
+            - name: metrics
+              containerPort: 8000
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi

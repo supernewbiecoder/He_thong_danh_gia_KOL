@@ -1,0 +1,155 @@
+# 3-node Kafka cluster in KRaft combined mode (broker + controller), one pod per node.
+# Node id = pod ordinal (kafka-0 -> 0). Each pod keeps its log dir on its own PVC, so a
+# rescheduled pod comes back with the same identity and data (auto-healing).
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: kafka
+  labels:
+    app.kubernetes.io/name: kafka
+    app.kubernetes.io/component: broker
+spec:
+  serviceName: kafka-headless
+  replicas: 3
+  # All pods must start together to form the controller quorum.
+  podManagementPolicy: Parallel
+  updateStrategy:
+    type: RollingUpdate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: kafka
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: kafka
+        app.kubernetes.io/component: broker
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "7071"
+        prometheus.io/job: kafka-broker
+    spec:
+      terminationGracePeriodSeconds: 60
+      securityContext:
+        fsGroup: 1000
+      affinity:
+        # Spread brokers over nodes when the cluster has more than one node.
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                topologyKey: kubernetes.io/hostname
+                labelSelector:
+                  matchLabels:
+                    app.kubernetes.io/name: kafka
+      containers:
+        - name: kafka
+          image: kol-kafka:3.9.0
+          imagePullPolicy: IfNotPresent
+          command:
+            - bash
+            - -c
+            - |
+              set -euo pipefail
+              export KAFKA_NODE_ID="${HOSTNAME##*-}"
+              DOMAIN="kafka-headless.${POD_NAMESPACE}.svc.cluster.local"
+              VOTERS=""
+              for ((i = 0; i < KOL_KAFKA_REPLICAS; i++)); do
+                VOTERS="${VOTERS:+${VOTERS},}${i}@kafka-${i}.${DOMAIN}:9093"
+              done
+              export KAFKA_CONTROLLER_QUORUM_VOTERS="${VOTERS}"
+              EXTERNAL_PORT=$((KOL_EXTERNAL_BASE_PORT + KAFKA_NODE_ID))
+              export KAFKA_ADVERTISED_LISTENERS="INTERNAL://${HOSTNAME}.${DOMAIN}:9092,EXTERNAL://${KOL_EXTERNAL_HOST}:${EXTERNAL_PORT}"
+              echo "node.id=${KAFKA_NODE_ID} voters=${KAFKA_CONTROLLER_QUORUM_VOTERS}"
+              exec /usr/local/bin/kol-kafka-entrypoint.sh
+          env:
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            # Must equal spec.replicas (used to build the controller quorum voter list)
+            - name: KOL_KAFKA_REPLICAS
+              value: "3"
+            # Advertised address for clients outside the cluster (NodePort services in services.yaml)
+            - name: KOL_EXTERNAL_HOST
+              value: localhost
+            - name: KOL_EXTERNAL_BASE_PORT
+              value: "30090"
+            - name: CLUSTER_ID
+              valueFrom:
+                configMapKeyRef:
+                  name: kafka-config
+                  key: CLUSTER_ID
+            - name: KAFKA_PROCESS_ROLES
+              value: broker,controller
+            - name: KAFKA_LISTENERS
+              value: INTERNAL://:9092,CONTROLLER://:9093,EXTERNAL://:9094
+            - name: KAFKA_LISTENER_SECURITY_PROTOCOL_MAP
+              value: INTERNAL:PLAINTEXT,CONTROLLER:PLAINTEXT,EXTERNAL:PLAINTEXT
+            - name: KAFKA_CONTROLLER_LISTENER_NAMES
+              value: CONTROLLER
+            - name: KAFKA_INTER_BROKER_LISTENER_NAME
+              value: INTERNAL
+            # Sub-directory: the PVC root may contain lost+found
+            - name: KAFKA_LOG_DIRS
+              value: /var/lib/kafka/data/kraft-logs
+            - name: KAFKA_DEFAULT_REPLICATION_FACTOR
+              value: "3"
+            - name: KAFKA_MIN_INSYNC_REPLICAS
+              value: "2"
+            - name: KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR
+              value: "3"
+            - name: KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR
+              value: "3"
+            - name: KAFKA_TRANSACTION_STATE_LOG_MIN_ISR
+              value: "2"
+            - name: KAFKA_NUM_PARTITIONS
+              value: "6"
+            - name: KAFKA_AUTO_CREATE_TOPICS_ENABLE
+              value: "false"
+            - name: KAFKA_LOG_RETENTION_HOURS
+              value: "168"
+            - name: KAFKA_HEAP_OPTS
+              value: "-Xms1g -Xmx1g"
+            - name: JMX_EXPORTER_PORT
+              value: "7071"
+          ports:
+            - name: internal
+              containerPort: 9092
+            - name: controller
+              containerPort: 9093
+            - name: external
+              containerPort: 9094
+            - name: metrics
+              containerPort: 7071
+          startupProbe:
+            tcpSocket:
+              port: internal
+            periodSeconds: 5
+            failureThreshold: 60
+          readinessProbe:
+            tcpSocket:
+              port: internal
+            periodSeconds: 10
+            failureThreshold: 3
+          livenessProbe:
+            tcpSocket:
+              port: controller
+            periodSeconds: 20
+            failureThreshold: 6
+          resources:
+            requests:
+              cpu: 500m
+              memory: 1536Mi
+            limits:
+              memory: 2Gi
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/kafka/data
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 10Gi

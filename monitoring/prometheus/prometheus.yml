@@ -1,0 +1,39 @@
+# Prometheus config for Docker Compose. Kubernetes uses k8s/base/monitoring/prometheus.yml
+# (same job names, so the Grafana dashboard and alert rules work in both environments).
+global:
+  scrape_interval: 5s        # short interval: we want to see load spikes during tests
+  evaluation_interval: 15s
+  external_labels:
+    cluster: kol-compose
+
+rule_files:
+  - /etc/prometheus/rules/*.yml
+
+scrape_configs:
+  - job_name: prometheus
+    static_configs:
+      - targets: ["localhost:9090"]
+
+  # Broker / controller metrics from the JMX exporter agent inside each Kafka container
+  - job_name: kafka-broker
+    static_configs:
+      - targets: ["kafka-1:7071", "kafka-2:7071", "kafka-3:7071"]
+    relabel_configs:
+      - source_labels: [__address__]
+        regex: "([^:]+):\\d+"
+        target_label: instance
+        replacement: "$1"
+
+  # Consumer group lag, topic offsets, broker count
+  - job_name: kafka-exporter
+    static_configs:
+      - targets: ["kafka-exporter:9308"]
+
+  # Load generator (only up when the `loadtest` profile runs). DNS discovery picks up
+  # every replica when the service is scaled: --scale loadgen-producer=3
+  - job_name: loadgen
+    dns_sd_configs:
+      - names: ["loadgen-producer", "loadgen-consumer"]
+        type: A
+        port: 8000
+        refresh_interval: 15s

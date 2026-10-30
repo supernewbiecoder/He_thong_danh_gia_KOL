@@ -1,0 +1,11 @@
+# Never let voluntary disruptions (node drain, upgrades) take down more than 1 broker:
+# with RF=3 / min.insync.replicas=2 the cluster keeps accepting writes with 2 brokers.
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: kafka
+spec:
+  maxUnavailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: kafka

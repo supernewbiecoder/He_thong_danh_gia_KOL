@@ -1,0 +1,53 @@
+# Base manifests for the KOL platform infrastructure (namespace kol-system).
+# Reuses files outside this directory, so render it with:
+#   kubectl kustomize --load-restrictor LoadRestrictionsNone k8s/overlays/dev
+# (scripts/k8s-deploy.sh does this for you)
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: kol-system
+
+labels:
+  - pairs:
+      app.kubernetes.io/part-of: kol-platform
+
+resources:
+  - namespace.yaml
+  - kafka/statefulset.yaml
+  - kafka/services.yaml
+  - kafka/pdb.yaml
+  - kafka/topics-job.yaml
+  - kafka-ui.yaml
+  - monitoring/kafka-exporter.yaml
+  - monitoring/prometheus.yaml
+  - monitoring/grafana.yaml
+
+configMapGenerator:
+  - name: kafka-config
+    literals:
+      # Base64 UUID shared by all nodes. Generate a new one with:
+      #   docker run --rm apache/kafka:3.9.0 /opt/kafka/bin/kafka-storage.sh random-uuid
+      - CLUSTER_ID=MkU3OEVBNTcwNTJENDM2Qk
+  - name: kafka-topics
+    files:
+      - topics.conf=../../config/topics.conf
+      - create-topics.sh=../../scripts/create-topics.sh
+  - name: prometheus-config
+    files:
+      - prometheus.yml=monitoring/prometheus.yml
+      - alerts.yml=../../monitoring/prometheus/alerts.yml
+  - name: grafana-datasources
+    files:
+      - ../../monitoring/grafana/provisioning/datasources/datasource.yml
+  - name: grafana-dashboard-providers
+    files:
+      - ../../monitoring/grafana/provisioning/dashboards/dashboards.yml
+  - name: grafana-dashboards
+    files:
+      - ../../monitoring/grafana/dashboards/kafka-overview.json
+
+secretGenerator:
+  - name: grafana-admin
+    literals:
+      - admin-user=admin
+      - admin-password=admin

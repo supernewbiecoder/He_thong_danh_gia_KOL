@@ -1,0 +1,14 @@
+# Dev overlay: single-node local clusters (Docker Desktop, minikube, kind).
+# Keeps 3 brokers (needed for the fault-tolerance demo) but shrinks memory and disk.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - ../../base
+
+patches:
+  - path: kafka-resources.yaml
+
+images:
+  - name: kol-kafka
+    newTag: 3.9.0

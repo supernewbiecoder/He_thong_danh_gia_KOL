@@ -1,0 +1,67 @@
+# TEMPLATE for the other modules (not applied by default).
+# Copy, rename `my-service`, set the image, then: kubectl apply -n kol-system -f <file>
+#
+# Checklist:
+#   - BOOTSTRAP_SERVERS = kafka:9092 (same namespace) or kafka.kol-system.svc.cluster.local:9092
+#   - consumers: replicas / maxReplicas <= partitions of the topic you read
+#   - expose Prometheus metrics? add the prometheus.io/* annotations below
+#   - handle SIGTERM: commit offsets / flush the producer before exiting
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: my-service
+  namespace: kol-system
+  labels:
+    app.kubernetes.io/name: my-service
+    app.kubernetes.io/part-of: kol-platform
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: my-service
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: my-service
+        app.kubernetes.io/part-of: kol-platform
+      annotations:
+        prometheus.io/scrape: "false"   # "true" if the app serves /metrics
+        prometheus.io/port: "8000"
+    spec:
+      terminationGracePeriodSeconds: 30
+      containers:
+        - name: app
+          image: my-service:1.0.0
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: BOOTSTRAP_SERVERS
+              value: kafka:9092
+            - name: KAFKA_GROUP_ID
+              value: my-service
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: my-service
+  namespace: kol-system
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: my-service
+  minReplicas: 1
+  maxReplicas: 3
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70

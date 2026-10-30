@@ -1,0 +1,36 @@
+# CPU-based auto-scaling for the consumer. Requires metrics-server
+# (minikube: `minikube addons enable metrics-server`).
+# maxReplicas must not exceed the topic's partition count (kol.loadtest = 6):
+# extra consumers in a group would sit idle.
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: loadgen-consumer
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: loadgen-consumer
+  minReplicas: 1
+  maxReplicas: 6
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 60
+  behavior:
+    scaleUp:
+      stabilizationWindowSeconds: 30
+      policies:
+        - type: Pods
+          value: 2
+          periodSeconds: 30
+    scaleDown:
+      # Scale down slowly: every scale event triggers a consumer group rebalance.
+      stabilizationWindowSeconds: 180
+      policies:
+        - type: Pods
+          value: 1
+          periodSeconds: 60
