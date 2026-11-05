@@ -68,7 +68,7 @@ docker compose logs kafka-init    # xem danh sách topic đã tạo
 
 | Dịch vụ | Địa chỉ |
 |---|---|
-| Kafka (từ máy host) | `localhost:9092,localhost:9093,localhost:9094` |
+| Kafka (từ máy host) | `127.0.0.1:9092,127.0.0.1:9093,127.0.0.1:9094` |
 | Kafka (từ container khác trong network `kol-net`) | `kafka-1:19092,kafka-2:19092,kafka-3:19092` |
 | Kafka UI | http://localhost:8080 |
 | Prometheus (targets, alerts) | http://localhost:9090 |
@@ -90,8 +90,13 @@ Dừng: `docker compose down` (giữ dữ liệu) · `docker compose down -v` (x
 | `kol.metrics.keywords` | 3 | Module 3 → Module 4/5 |
 | `kol.dlq` | 3 | mọi module (message lỗi) |
 | `kol.loadtest` | 6 | chỉ dùng cho load test |
+| `kol.dev.sandbox` | 3 | kiểm tra kết nối, thử nghiệm |
 
-Tất cả topic có RF = 3 và `min.insync.replicas = 2`. Format message (JSON) được đề xuất trong [config/schemas/social-event.schema.json](config/schemas/social-event.schema.json).
+Tất cả topic có RF = 3 và `min.insync.replicas = 2`, và có giới hạn dung lượng để không làm đầy đĩa. Format message (JSON) được đề xuất trong [config/schemas/social-event.schema.json](config/schemas/social-event.schema.json).
+
+## Hạ tầng dùng chung của nhóm
+
+Kafka và PostgreSQL chạy trên máy của một thành viên, cả nhóm truy cập qua Tailscale. Trên máy đó chỉ cần chạy `./scripts/shared.sh up`. Cách kết nối, tài khoản, sao lưu và giới hạn: [docs/shared-infrastructure.md](docs/shared-infrastructure.md).
 
 ## Kiểm thử chịu tải
 
@@ -128,9 +133,11 @@ Chi tiết (auto-healing, scale, KEDA theo lag, truy cập từ ngoài): [docs/k
 ```
 .
 ├── docker-compose.yml          # Kafka x3 + init topic + UI + exporter + Prometheus + Grafana (+ loadtest profile)
+├── docker-compose.shared.yml   # thêm PostgreSQL + sao lưu cho môi trường dùng chung
 ├── .env.example                # biến cấu hình (port, heap, tốc độ load test...)
 ├── config/
 │   ├── topics.conf             # định nghĩa topic (dùng chung cho Compose & K8s)
+│   ├── postgres/init/          # tạo tài khoản và schema PostgreSQL
 │   └── schemas/                # JSON schema của event chuẩn hóa
 ├── docker/kafka/               # image Kafka + JMX exporter + rules
 ├── loadtest/                   # load generator (Python) + Dockerfile
@@ -142,12 +149,13 @@ Chi tiết (auto-healing, scale, KEDA theo lag, truy cập từ ngoài): [docs/k
 │   ├── overlays/dev/           # giảm tài nguyên cho cluster local
 │   ├── apps/                   # loadgen + HPA + template cho module khác
 │   └── addons/keda/            # scale theo consumer lag (tùy chọn)
-├── scripts/                    # create-topics, cluster-status, perf-test, chaos, build, deploy
+├── scripts/                    # shared (hạ tầng dùng chung), create-topics, cluster-status, perf-test, chaos, build, deploy
 └── docs/                       # kiến trúc, hướng dẫn tích hợp, K8s, giám sát & load test
 ```
 
 ## Tài liệu
 
+- [docs/shared-infrastructure.md](docs/shared-infrastructure.md): **hạ tầng dùng chung**: kết nối từ xa, PostgreSQL, sao lưu
 - [docs/architecture.md](docs/architecture.md): thiết kế hạ tầng và các quyết định kỹ thuật (KRaft, RF/ISR, partition, listener)
 - [docs/integration-guide.md](docs/integration-guide.md): **dành cho các module khác**: kết nối Kafka, cấu hình producer/consumer, format message
 - [docs/kubernetes.md](docs/kubernetes.md): triển khai, auto-healing, auto-scaling
@@ -160,7 +168,7 @@ Chi tiết (auto-healing, scale, KEDA theo lag, truy cập từ ngoài): [docs/k
 | `kafka-x` mãi `unhealthy` | Thiếu RAM: tăng RAM cho Docker hoặc giảm `KAFKA_HEAP_OPTS`. Xem `docker logs kafka-1`. |
 | `Cluster ID mismatch` / `Invalid cluster.id` | Đã đổi `KAFKA_CLUSTER_ID` khi volume cũ còn: `docker compose down -v`. |
 | `bash\r: No such file or directory` | File `.sh` bị đổi sang CRLF: `git add --renormalize .` (repo có `.gitattributes`) hoặc lưu lại dạng LF. |
-| Client trên host không kết nối được | Dùng `localhost:9092,...` (host) và `kafka-1:19092,...` (container); không dùng lẫn hai loại. |
+| Client trên host không kết nối được | Dùng `127.0.0.1:9092,...` (host) và `kafka-1:19092,...` (container); không dùng lẫn hai loại. |
 | `UNKNOWN_TOPIC_OR_PARTITION` | Topic chưa có trong `config/topics.conf` → thêm rồi `docker compose up kafka-init`. |
 | `NOT_ENOUGH_REPLICAS` | Từ 2 broker trở lên đang chết (ISR < 2). Kiểm tra `./scripts/cluster-status.sh`. |
 | Port 8080/3000/9090 bị chiếm | Đổi `KAFKA_UI_PORT`, `GRAFANA_PORT`, `PROMETHEUS_PORT` trong `.env`. |

@@ -2,6 +2,7 @@
 .env
 .env.*
 !.env.example
+!.env.shared.example
 *.local.yaml
 *.local.yml
 kubeconfig*
@@ -28,6 +29,7 @@ build/
 
 # ---- Load test output / runtime data ----------------------------------------
 loadtest/results/
+backups/
 results/
 data/
 *.log

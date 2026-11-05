@@ -6,9 +6,10 @@ Dành cho Module 2 (collector), Module 3 (stream consumer), Module 4 (DB) và Mo
 
 | Code của bạn chạy ở đâu | `bootstrap.servers` |
 |---|---|
-| Trực tiếp trên máy (python/node chạy local) | `localhost:9092,localhost:9093,localhost:9094` |
+| Trực tiếp trên máy (python/node chạy local) | `127.0.0.1:9092,127.0.0.1:9093,127.0.0.1:9094` |
 | Container trong Docker Compose (network `kol-net`) | `kafka-1:19092,kafka-2:19092,kafka-3:19092` |
 | Pod trong Kubernetes (namespace `kol-system`) | `kafka:9092` (cùng namespace) hoặc `kafka.kol-system.svc.cluster.local:9092` |
+| Máy khác trong nhóm, qua Tailscale ([hướng dẫn](shared-infrastructure.md)) | `HOST:9092,HOST:9093,HOST:9094` |
 | Máy host → Kubernetes local (Docker Desktop) | `localhost:30090,localhost:30091,localhost:30092` |
 
 Nên đọc địa chỉ từ biến môi trường `BOOTSTRAP_SERVERS` thay vì hard-code.
@@ -39,6 +40,7 @@ Chạy hạ tầng trước (`docker compose up -d` ở thư mục gốc), sau �
 | `kol.metrics.kol-scores` | Module 3 | Module 4, 5 | `kol_id` (compacted: chỉ giữ bản mới nhất) |
 | `kol.metrics.keywords` | Module 3 | Module 4, 5 | keyword/hashtag |
 | `kol.dlq` | tất cả | debug | tùy |
+| `kol.dev.sandbox` | tất cả | tất cả | tùy (thử nghiệm) |
 
 Cần topic mới: thêm một dòng vào [`config/topics.conf`](../config/topics.conf) rồi báo Module 1 (hoặc tự chạy `docker compose up kafka-init`). Cluster **không tự tạo topic**.
 
@@ -77,7 +79,7 @@ import json, os
 from confluent_kafka import Producer
 
 producer = Producer({
-    "bootstrap.servers": os.getenv("BOOTSTRAP_SERVERS", "localhost:9092,localhost:9093,localhost:9094"),
+    "bootstrap.servers": os.getenv("BOOTSTRAP_SERVERS", "127.0.0.1:9092,127.0.0.1:9093,127.0.0.1:9094"),
     "client.id": "bluesky-collector",
     "acks": "all",                 # bắt buộc: chờ đủ min.insync.replicas (=2)
     "enable.idempotence": True,    # retry không tạo bản ghi trùng
@@ -114,7 +116,7 @@ running = True
 signal.signal(signal.SIGTERM, lambda *_: globals().update(running=False))
 
 consumer = Consumer({
-    "bootstrap.servers": os.getenv("BOOTSTRAP_SERVERS", "localhost:9092,localhost:9093,localhost:9094"),
+    "bootstrap.servers": os.getenv("BOOTSTRAP_SERVERS", "127.0.0.1:9092,127.0.0.1:9093,127.0.0.1:9094"),
     "group.id": "stream-processor",       # mọi instance cùng group sẽ chia nhau partition
     "auto.offset.reset": "earliest",      # group mới: đọc từ đầu
     "enable.auto.commit": False,          # tự commit sau khi xử lý xong (at-least-once)

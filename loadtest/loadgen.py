@@ -5,8 +5,8 @@ at a controlled rate, or consumes them while measuring end-to-end latency. Metri
 in Prometheus format on :8000 so the Grafana dashboard shows the test live.
 
 Examples:
-    python loadgen.py produce --bootstrap localhost:9092 --rate 5000 --duration 120
-    python loadgen.py consume --bootstrap localhost:9092 --group loadgen-consumer
+    python loadgen.py produce --bootstrap 127.0.0.1:9092 --rate 5000 --duration 120
+    python loadgen.py consume --bootstrap 127.0.0.1:9092 --group loadgen-consumer
     python loadgen.py produce --rate 0 --duration 60      # unthrottled: find max throughput
 
 Every option can also be set with an environment variable (see --help), which is how
@@ -57,7 +57,7 @@ def env(name: str, default):
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("mode", nargs="?", choices=("produce", "consume"), default=env("LOADGEN_MODE", "produce"))
-    p.add_argument("--bootstrap", default=env("BOOTSTRAP_SERVERS", "localhost:9092"),
+    p.add_argument("--bootstrap", default=env("BOOTSTRAP_SERVERS", "127.0.0.1:9092"),
                    help="Kafka bootstrap servers [BOOTSTRAP_SERVERS]")
     p.add_argument("--topic", default=env("LOADGEN_TOPIC", "kol.loadtest"), help="[LOADGEN_TOPIC]")
     p.add_argument("--rate", type=int, default=int(env("LOADGEN_RATE", 1000)),

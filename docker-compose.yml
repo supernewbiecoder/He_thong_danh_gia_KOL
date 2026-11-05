@@ -4,13 +4,16 @@
 #   docker compose --profile loadtest up -d       # + load generator (producer + consumer)
 #
 # Endpoints (host):
-#   Kafka bootstrap   localhost:9092,localhost:9093,localhost:9094
+#   Kafka bootstrap   127.0.0.1:9092,127.0.0.1:9093,127.0.0.1:9094
 #   Kafka UI          http://localhost:8080
 #   Prometheus        http://localhost:9090
 #   Grafana           http://localhost:3000   (admin / admin)
 #
 # Containers of other modules join the `kol-net` network and use
 #   kafka-1:19092,kafka-2:19092,kafka-3:19092
+#
+# Ports are published on 127.0.0.1 only, because Kafka and Kafka UI have no authentication.
+# To share the cluster with the team, see docker-compose.shared.yml and scripts/shared.sh.
 name: kol-platform
 
 x-kafka-env: &kafka-env
@@ -67,12 +70,12 @@ services:
     container_name: kafka-1
     hostname: kafka-1
     ports:
-      - "9092:9092"
+      - "${BIND_ADDRESS:-127.0.0.1}:9092:9092"
     environment:
       <<: *kafka-env
       KAFKA_NODE_ID: 1
       KAFKA_LISTENERS: INTERNAL://:19092,CONTROLLER://:19093,EXTERNAL://:9092
-      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka-1:19092,EXTERNAL://localhost:9092
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka-1:19092,EXTERNAL://${KAFKA_ADVERTISED_HOST:-127.0.0.1}:9092
     volumes:
       - kafka-1-data:/var/lib/kafka/data
 
@@ -81,12 +84,12 @@ services:
     container_name: kafka-2
     hostname: kafka-2
     ports:
-      - "9093:9093"
+      - "${BIND_ADDRESS:-127.0.0.1}:9093:9093"
     environment:
       <<: *kafka-env
       KAFKA_NODE_ID: 2
       KAFKA_LISTENERS: INTERNAL://:19092,CONTROLLER://:19093,EXTERNAL://:9093
-      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka-2:19092,EXTERNAL://localhost:9093
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka-2:19092,EXTERNAL://${KAFKA_ADVERTISED_HOST:-127.0.0.1}:9093
     volumes:
       - kafka-2-data:/var/lib/kafka/data
 
@@ -95,12 +98,12 @@ services:
     container_name: kafka-3
     hostname: kafka-3
     ports:
-      - "9094:9094"
+      - "${BIND_ADDRESS:-127.0.0.1}:9094:9094"
     environment:
       <<: *kafka-env
       KAFKA_NODE_ID: 3
       KAFKA_LISTENERS: INTERNAL://:19092,CONTROLLER://:19093,EXTERNAL://:9094
-      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka-3:19092,EXTERNAL://localhost:9094
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka-3:19092,EXTERNAL://${KAFKA_ADVERTISED_HOST:-127.0.0.1}:9094
     volumes:
       - kafka-3-data:/var/lib/kafka/data
 
@@ -122,7 +125,7 @@ services:
     image: ghcr.io/kafbat/kafka-ui:v1.1.0
     container_name: kafka-ui
     ports:
-      - "${KAFKA_UI_PORT:-8080}:8080"
+      - "${BIND_ADDRESS:-127.0.0.1}:${KAFKA_UI_PORT:-8080}:8080"
     environment:
       KAFKA_CLUSTERS_0_NAME: kol-cluster
       KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka-1:19092,kafka-2:19092,kafka-3:19092
@@ -142,7 +145,7 @@ services:
       - --kafka.server=kafka-3:19092
       - --refresh.metadata=30s
     ports:
-      - "9308:9308"
+      - "127.0.0.1:9308:9308"
     depends_on: *kafka-ready
     restart: unless-stopped
 
@@ -155,7 +158,7 @@ services:
       - --storage.tsdb.retention.time=${PROMETHEUS_RETENTION:-7d}
       - --web.enable-lifecycle
     ports:
-      - "${PROMETHEUS_PORT:-9090}:9090"
+      - "${BIND_ADDRESS:-127.0.0.1}:${PROMETHEUS_PORT:-9090}:9090"
     volumes:
       - ./monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - ./monitoring/prometheus/alerts.yml:/etc/prometheus/rules/alerts.yml:ro
@@ -166,7 +169,7 @@ services:
     image: grafana/grafana:11.3.0
     container_name: grafana
     ports:
-      - "${GRAFANA_PORT:-3000}:3000"
+      - "${BIND_ADDRESS:-127.0.0.1}:${GRAFANA_PORT:-3000}:3000"
     environment:
       GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
       GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}

@@ -1,0 +1,60 @@
+# Team-shared environment: adds PostgreSQL and daily backups on top of docker-compose.yml.
+# Do not run it by hand; scripts/shared.sh passes the right files and .env.shared.
+#
+#   ./scripts/shared.sh up
+#
+# Nothing here listens on the network directly. Ports stay on 127.0.0.1 and `tailscale serve`
+# forwards them to members of the tailnet. See docs/shared-infrastructure.md.
+services:
+  grafana:
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?set it in .env.shared}
+
+  postgres:
+    image: postgres:16.6
+    container_name: kol-postgres
+    ports:
+      - "${BIND_ADDRESS:-127.0.0.1}:5432:5432"
+    environment:
+      POSTGRES_USER: kol_admin
+      POSTGRES_PASSWORD: ${POSTGRES_ADMIN_PASSWORD:?set it in .env.shared}
+      POSTGRES_DB: kol
+      POSTGRES_APP_PASSWORD: ${POSTGRES_APP_PASSWORD:?set it in .env.shared}
+      POSTGRES_READONLY_PASSWORD: ${POSTGRES_READONLY_PASSWORD:?set it in .env.shared}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      # Runs only once, when the data volume is empty
+      - ./config/postgres/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U kol_admin -d kol"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    deploy:
+      resources:
+        limits:
+          memory: 1g
+    restart: unless-stopped
+
+  postgres-backup:
+    image: postgres:16.6
+    container_name: kol-postgres-backup
+    entrypoint: ["bash", "/scripts/pg-backup.sh"]
+    environment:
+      PGHOST: postgres
+      PGUSER: kol_admin
+      PGPASSWORD: ${POSTGRES_ADMIN_PASSWORD:?set it in .env.shared}
+      PGDATABASE: kol
+      BACKUP_INTERVAL_HOURS: ${BACKUP_INTERVAL_HOURS:-24}
+      BACKUP_KEEP_DAYS: ${BACKUP_KEEP_DAYS:-14}
+    volumes:
+      - ./scripts:/scripts:ro
+      - ./backups:/backups
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  postgres-data:

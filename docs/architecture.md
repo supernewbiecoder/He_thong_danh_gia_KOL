@@ -7,7 +7,7 @@ Tài liệu mô tả thiết kế của Module 1 và lý do của từng quyết
 Collector (Module 2) không ghi thẳng vào DB mà publish vào Kafka. Kafka đóng vai trò:
 
 - **Bộ đệm (buffer)**: khi có tải đột biến (một KOL viral, firehose Bluesky tăng vọt), message được giữ lại trên đĩa của broker và consumer xử lý theo tốc độ của mình. DB không bị nghẽn.
-- **Tách rời (decoupling)**: collector và consumer có thể deploy, scale, restart độc lập. Khi consumer chết, dữ liệu vẫn còn trong Kafka (retention 3–7 ngày) và consumer đọc tiếp từ offset đã commit.
+- **Tách rời (decoupling)**: collector và consumer có thể deploy, scale, restart độc lập. Khi consumer chết, dữ liệu vẫn còn trong Kafka (giữ 3–7 ngày, có giới hạn dung lượng) và consumer đọc tiếp từ offset đã commit.
 - **Song song hóa**: mỗi topic chia thành nhiều partition, và mỗi partition được giao cho đúng 1 consumer trong một consumer group, nên thêm consumer là tăng throughput (tối đa bằng số partition).
 - **Phát lại (replay)**: khi sửa logic tính điểm, có thể reset offset để tính lại từ dữ liệu cũ.
 
