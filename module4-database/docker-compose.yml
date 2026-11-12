@@ -1,0 +1,99 @@
+services:
+  postgres-primary:
+    image: postgres:16.6
+    container_name: module4-postgres-primary
+    restart: unless-stopped
+
+    environment:
+      POSTGRES_USER: kol_admin
+      POSTGRES_PASSWORD: ${POSTGRES_ADMIN_PASSWORD}
+      POSTGRES_DB: kol
+      POSTGRES_APP_PASSWORD: ${POSTGRES_APP_PASSWORD}
+      POSTGRES_READONLY_PASSWORD: ${POSTGRES_READONLY_PASSWORD}
+      POSTGRES_REPLICATION_PASSWORD: ${POSTGRES_REPLICATION_PASSWORD}
+      PGDATA: /var/lib/postgresql/data/pgdata
+
+    command:
+      - postgres
+      - -c
+      - wal_level=replica
+      - -c
+      - max_wal_senders=10
+      - -c
+      - max_replication_slots=10
+      - -c
+      - hba_file=/etc/postgresql/pg_hba.conf
+
+    ports:
+      - "127.0.0.1:5433:5432"
+
+    volumes:
+      - postgres-primary-data:/var/lib/postgresql/data
+      - ../config/postgres/init/01-roles.sh:/docker-entrypoint-initdb.d/01-roles.sh:ro
+      - ./config/replication-user.sh:/docker-entrypoint-initdb.d/02-replication-user.sh:ro
+      - ./config/pg_hba.conf:/etc/postgresql/pg_hba.conf:ro
+
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U kol_admin -d kol"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+    mem_limit: 512m
+
+    networks:
+      - module4-net
+
+  postgres-standby:
+    image: postgres:16.6
+    container_name: module4-postgres-standby
+    restart: unless-stopped
+
+    environment:
+      PGDATA: /var/lib/postgresql/data/pgdata
+      PRIMARY_HOST: postgres-primary
+      PRIMARY_PORT: 5432
+      REPLICATION_USER: kol_replicator
+      REPLICATION_PASSWORD: ${POSTGRES_REPLICATION_PASSWORD}
+
+    entrypoint:
+      - /bin/bash
+      - /scripts/standby-entrypoint.sh
+
+    command:
+      - postgres
+      - -c
+      - hot_standby=on
+
+    ports:
+      - "127.0.0.1:5434:5432"
+
+    volumes:
+      - postgres-standby-data:/var/lib/postgresql/data
+      - ./scripts/standby-entrypoint.sh:/scripts/standby-entrypoint.sh:ro
+
+    depends_on:
+      postgres-primary:
+        condition: service_healthy
+
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -p 5432"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+    mem_limit: 512m
+
+    networks:
+      - module4-net
+
+volumes:
+  postgres-primary-data:
+  postgres-standby-data:
+
+networks:
+  module4-net:
+    external: true
+    name: module4-net
