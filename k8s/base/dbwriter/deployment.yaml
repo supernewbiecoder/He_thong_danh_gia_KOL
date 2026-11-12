@@ -1,0 +1,63 @@
+# Module 4 on Kubernetes: reads kol.raw.* from Kafka and stores every event in PostgreSQL.
+#
+# At-least-once: the consumer commits Kafka offsets only after the PostgreSQL transaction commits,
+# and every row is an upsert on event_id, so a pod restart or rebalance does not duplicate data.
+#
+# Scale limit: replicas must stay <= the smallest partition count it reads (YouTube has 3),
+# otherwise the extra pods sit idle. 1 replica is plenty for the project load.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: db-writer
+  labels:
+    app.kubernetes.io/name: db-writer
+    app.kubernetes.io/component: writer
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: db-writer
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: db-writer
+        app.kubernetes.io/component: writer
+    spec:
+      terminationGracePeriodSeconds: 30
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10002
+      containers:
+        - name: db-writer
+          image: kol-dbwriter:1.0.0
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: BOOTSTRAP_SERVERS
+              value: kafka:9092
+            # Secret first, then DATABASE_URL built from it. Kubernetes expands $(VAR) inside
+            # env values, so the password never appears in a manifest or in git.
+            - name: POSTGRES_APP_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-credentials
+                  key: app-password
+            - name: DATABASE_URL
+              value: postgresql://kol_app:$(POSTGRES_APP_PASSWORD)@postgres:5432/kol
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              memory: 512Mi
+---
+# One writer process draining the partitions in order is enough here; create an HPA only if the
+# consumer lag (kafka_consumergroup_lag, group postgres-writer) stays high with 1 replica.
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: db-writer
+spec:
+  maxUnavailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: db-writer

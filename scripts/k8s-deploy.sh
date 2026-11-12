@@ -21,6 +21,17 @@ if [[ "${2:-}" == "--dry" ]]; then
 fi
 
 echo ">> context: $(kubectl config current-context)"
+
+# PostgreSQL needs a secret before the StatefulSet can start. Create it once with random
+# passwords; never overwrite an existing one (that would lock out the running database).
+if ! kubectl -n "$NS" get secret postgres-credentials >/dev/null 2>&1; then
+  echo ">> creating secret postgres-credentials with random passwords"
+  kubectl -n "$NS" create secret generic postgres-credentials \
+    --from-literal=admin-password="$(openssl rand -hex 24)" \
+    --from-literal=app-password="$(openssl rand -hex 24)" \
+    --from-literal=readonly-password="$(openssl rand -hex 24)" >/dev/null
+fi
+
 # Jobs are immutable; the topic job is re-created on every deploy (it is idempotent).
 kubectl -n "$NS" delete job kafka-topics-init --ignore-not-found >/dev/null 2>&1 || true
 
@@ -30,6 +41,8 @@ echo ">> waiting for Kafka StatefulSet..."
 kubectl -n "$NS" rollout status statefulset/kafka --timeout=600s
 echo ">> waiting for topic job..."
 kubectl -n "$NS" wait --for=condition=complete job/kafka-topics-init --timeout=300s
+echo ">> waiting for PostgreSQL StatefulSet..."
+kubectl -n "$NS" rollout status statefulset/postgres --timeout=600s
 kubectl -n "$NS" get pods -o wide
 
 cat <<EOF
@@ -40,4 +53,8 @@ Deployed. Access from your machine:
   kubectl -n $NS port-forward svc/kafka-ui 8080:8080     -> http://localhost:8080
   Kafka from host (NodePort): localhost:30090,localhost:30091,localhost:30092
   Kafka in-cluster:           kafka.$NS.svc.cluster.local:9092
+  PostgreSQL in-cluster:      postgres.$NS.svc.cluster.local:5432 (db kol, roles kol_app/kol_readonly)
+
+PostgreSQL passwords live in the postgres-credentials secret:
+  kubectl -n $NS get secret postgres-credentials -o jsonpath='{.data.app-password}' | base64 -d
 EOF

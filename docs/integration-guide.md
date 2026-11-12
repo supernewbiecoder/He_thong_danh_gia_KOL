@@ -36,7 +36,7 @@ Chạy hạ tầng trước (`docker compose up -d` ở thư mục gốc), sau �
 
 | Topic | Ai ghi | Ai đọc | Key |
 |---|---|---|---|
-| `kol.raw.bluesky` / `kol.raw.youtube` / `kol.raw.reddit` | Module 2 | Module 3 | `kol_id` |
+| `kol.raw.bluesky` / `kol.raw.youtube` | Module 2 | Module 3 | `kol_id` |
 | `kol.metrics.kol-scores` | Module 3 | Module 4, 5 | `kol_id` (compacted: chỉ giữ bản mới nhất) |
 | `kol.metrics.keywords` | Module 3 | Module 4, 5 | keyword/hashtag |
 | `kol.dlq` | tất cả | debug | tùy |
@@ -121,7 +121,7 @@ consumer = Consumer({
     "auto.offset.reset": "earliest",      # group mới: đọc từ đầu
     "enable.auto.commit": False,          # tự commit sau khi xử lý xong (at-least-once)
 })
-consumer.subscribe(["kol.raw.bluesky", "kol.raw.youtube", "kol.raw.reddit"])
+consumer.subscribe(["kol.raw.bluesky", "kol.raw.youtube"])
 
 try:
     while running:

@@ -58,6 +58,19 @@ create_env_file() {
       .env.shared.example > "$ENV_FILE"
 }
 
+# The shared host runs the collector too, so its credentials must be in .env.shared. Copying them
+# from the local .env avoids retyping the YouTube key into a second file.
+carry_over_credentials() {
+  local key value
+  [[ -f .env ]] || return 0
+  for key in YOUTUBE_API_KEY YOUTUBE_CHANNEL_IDS YOUTUBE_SEARCH_QUERIES BLUESKY_HANDLES; do
+    value="$(tr -d '\r' < .env | sed -n "s/^${key}=//p" | head -n 1)"
+    [[ -n "$value" ]] || continue
+    sed -i.bak -e "s|^${key}=.*|${key}=${value}|" "$ENV_FILE" && rm -f "${ENV_FILE}.bak"
+    log "Copied ${key} from .env"
+  done
+}
+
 publish() {
   local p
   for p in "${PORTS[@]}"; do
@@ -88,14 +101,21 @@ Connection details (contain passwords: share them privately, do not commit them)
   Prometheus  http://${host}:9090
 
 EOF
+  if [[ -z "$(env_value YOUTUBE_API_KEY)" ]]; then
+    warn "YOUTUBE_API_KEY is empty in ${ENV_FILE}: only Bluesky is collected. Add the key and run: ./scripts/shared.sh up"
+  fi
 }
 
 case "${1:-}" in
   up)
-    [[ -f "$ENV_FILE" ]] || create_env_file
+    if [[ ! -f "$ENV_FILE" ]]; then
+      create_env_file
+      carry_over_credentials
+    fi
     mkdir -p backups
     dc up -d --build --wait --wait-timeout 300 \
-      kafka-1 kafka-2 kafka-3 kafka-ui kafka-exporter prometheus grafana postgres postgres-backup
+      kafka-1 kafka-2 kafka-3 kafka-ui kafka-exporter prometheus grafana postgres postgres-backup \
+      db-writer social-collectors
     dc run --rm kafka-init
     use_tailscale && publish
     show_info

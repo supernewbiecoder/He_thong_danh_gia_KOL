@@ -18,6 +18,11 @@ resources:
   - kafka/pdb.yaml
   - kafka/topics-job.yaml
   - kafka-ui.yaml
+  - postgres/statefulset.yaml
+  - postgres/services.yaml
+  - postgres/pdb.yaml
+  - dbwriter/deployment.yaml
+  - collectors/deployment.yaml
   - monitoring/kafka-exporter.yaml
   - monitoring/prometheus.yaml
   - monitoring/grafana.yaml
@@ -32,6 +37,38 @@ configMapGenerator:
     files:
       - topics.conf=../../config/topics.conf
       - create-topics.sh=../../scripts/create-topics.sh
+  - name: postgres-init
+    files:
+      # Same scripts as the Compose shared environment. 01 creates kol_app / kol_readonly
+      # and schema kol; 02 creates kol.social_events and its indexes.
+      - 01-roles.sh=../../config/postgres/init/01-roles.sh
+      - 02-schema.sql=../../dbwriter/schema.sql
+  - name: collectors-config
+    literals:
+      # Non-secret collector settings. Credentials live in the collector-credentials secret.
+      - COLLECTORS=bluesky,youtube
+      - COLLECTOR_POLL_SECONDS=900
+      - COLLECTOR_HTTP_TIMEOUT=20
+      - COLLECTOR_DEDUPE_CACHE=50000
+      - BLUESKY_MODE=firehose
+      - BLUESKY_FIREHOSE_URL=wss://jetstream1.us-east.bsky.network/subscribe
+      - BLUESKY_COLLECTIONS=app.bsky.feed.post,app.bsky.feed.like,app.bsky.feed.repost,app.bsky.graph.follow
+      - BLUESKY_ENRICH_INTERACTIONS=true
+      - BLUESKY_ENRICH_AUTHORS=true
+      - BLUESKY_AUTHOR_CACHE_SECONDS=3600
+      - BLUESKY_PUBLISH_BATCH=25
+      - BLUESKY_POST_CACHE_SIZE=100000
+      - BLUESKY_CURSOR_FILE=/data/bluesky-cursor.json
+      - BLUESKY_RECONNECT_SECONDS=5
+      - BLUESKY_FLUSH_EVERY=500
+      - BLUESKY_FLUSH_SECONDS=5
+      - YOUTUBE_SEARCH_QUERIES=music,technology,football,entertainment,celebrity,politics
+      - YOUTUBE_INCLUDE_COMMENTS=true
+      - YOUTUBE_SEARCH_MAX_PAGES=5
+      - YOUTUBE_COMMENT_MAX_PAGES=5
+      - YOUTUBE_INCLUDE_REPLIES=false
+      - YOUTUBE_MAX_REPLY_PAGES=1
+      - YOUTUBE_MAX_PAGES=5
   - name: prometheus-config
     files:
       - prometheus.yml=monitoring/prometheus.yml

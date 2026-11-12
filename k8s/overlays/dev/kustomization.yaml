@@ -8,6 +8,7 @@ resources:
 
 patches:
   - path: kafka-resources.yaml
+  - path: postgres-resources.yaml
 
 images:
   - name: kol-kafka

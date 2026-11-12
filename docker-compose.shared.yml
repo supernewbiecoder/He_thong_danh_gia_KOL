@@ -25,6 +25,8 @@ services:
       - postgres-data:/var/lib/postgresql/data
       # Runs only once, when the data volume is empty
       - ./config/postgres/init:/docker-entrypoint-initdb.d:ro
+      # Same DDL the writer applies on startup; numbered so it runs after 01-roles.sh
+      - ./dbwriter/schema.sql:/docker-entrypoint-initdb.d/02-schema.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U kol_admin -d kol"]
       interval: 10s
@@ -54,6 +56,32 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+    restart: unless-stopped
+
+  # Reads kol.raw.* from Kafka and stores every event in PostgreSQL (Module 4).
+  # At-least-once: offsets are committed only after the database transaction commits.
+  db-writer:
+    build: ./dbwriter
+    image: kol-dbwriter:1.0.0
+    container_name: kol-db-writer
+    environment:
+      BOOTSTRAP_SERVERS: kafka-1:19092,kafka-2:19092,kafka-3:19092
+      DATABASE_URL: postgresql://kol_app:${POSTGRES_APP_PASSWORD:?set it in .env.shared}@postgres:5432/kol
+      DB_WRITER_GROUP: ${DB_WRITER_GROUP:-postgres-writer}
+      DB_WRITER_BATCH_SIZE: ${DB_WRITER_BATCH_SIZE:-500}
+      DB_WRITER_RETRY_SECONDS: ${DB_WRITER_RETRY_SECONDS:-5}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka-1:
+        condition: service_healthy
+      kafka-2:
+        condition: service_healthy
+      kafka-3:
+        condition: service_healthy
+      kafka-init:
+        condition: service_completed_successfully
     restart: unless-stopped
 
 volumes:

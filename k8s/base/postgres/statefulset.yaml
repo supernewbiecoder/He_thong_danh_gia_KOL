@@ -1,0 +1,102 @@
+# PostgreSQL for the KOL platform (Module 4 persistence).
+#
+# One instance is enough for the project scope: the durability story here is the PVC plus the
+# TLS/Tailscale-protected network, not streaming replication. Kafka is what absorbs bursts;
+# PostgreSQL stores the normalized events the db-writer consumes from kol.raw.*.
+#
+# Schema and roles are created by the postgres image itself on the FIRST start of the volume
+# (/docker-entrypoint-initdb.d). db-writer also applies dbwriter/schema.sql on startup, so an
+# existing volume still picks up new DDL.
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: postgres
+  labels:
+    app.kubernetes.io/name: postgres
+    app.kubernetes.io/component: database
+spec:
+  serviceName: postgres-headless
+  replicas: 1
+  updateStrategy:
+    type: RollingUpdate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: postgres
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: postgres
+        app.kubernetes.io/component: database
+    spec:
+      terminationGracePeriodSeconds: 60
+      securityContext:
+        fsGroup: 999
+      containers:
+        - name: postgres
+          image: postgres:16.6
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: postgres
+              containerPort: 5432
+          env:
+            - name: POSTGRES_USER
+              value: kol_admin
+            - name: POSTGRES_DB
+              value: kol
+            # Sub-directory: the PVC root may contain lost+found
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-credentials
+                  key: admin-password
+            # Read by 01-roles.sh to create kol_app / kol_readonly
+            - name: POSTGRES_APP_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-credentials
+                  key: app-password
+            - name: POSTGRES_READONLY_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-credentials
+                  key: readonly-password
+          readinessProbe:
+            exec:
+              command: ["sh", "-c", "pg_isready -U kol_admin -d kol"]
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          livenessProbe:
+            exec:
+              command: ["sh", "-c", "pg_isready -U kol_admin -d kol"]
+            initialDelaySeconds: 30
+            periodSeconds: 20
+            timeoutSeconds: 5
+            failureThreshold: 6
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              memory: 1Gi
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+            - name: init
+              mountPath: /docker-entrypoint-initdb.d
+              readOnly: true
+      volumes:
+        - name: init
+          configMap:
+            name: postgres-init
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 5Gi

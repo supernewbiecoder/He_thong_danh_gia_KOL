@@ -10,6 +10,10 @@ namespace kol-system
 ├── Service kafka-{0,1,2}-external (NodePort 30090-30092)
 ├── PodDisruptionBudget kafka (maxUnavailable 1)
 ├── Job kafka-topics-init (tạo topic từ config/topics.conf)
+├── StatefulSet postgres (+ PVC data-postgres-0) + Service postgres/postgres-headless
+├── PodDisruptionBudget postgres (maxUnavailable 1)
+├── Deployment db-writer (Kafka -> PostgreSQL) + PDB
+├── Deployment social-collectors + PVC social-collectors-cursors
 ├── Deployment kafka-ui, kafka-exporter, prometheus (+ RBAC), grafana
 └── k8s/apps: Deployment loadgen-producer, loadgen-consumer + HPA
 ```
@@ -18,6 +22,12 @@ namespace kol-system
 |---|---|
 | `k8s/base/kafka/statefulset.yaml` | Broker KRaft; node id = số thứ tự pod; voter list được dựng từ `KOL_KAFKA_REPLICAS` |
 | `k8s/base/kafka/services.yaml` | Headless + bootstrap + NodePort từng broker |
+| `k8s/base/postgres/statefulset.yaml` | PostgreSQL 16 + PVC; role và bảng tạo lần đầu từ ConfigMap `postgres-init` |
+| `k8s/base/postgres/services.yaml` | `postgres:5432` (ClusterIP) + headless cho DNS ổn định |
+| `k8s/base/postgres/secret.example.yaml` | Mẫu Secret, **không** nằm trong kustomization nên không bị apply |
+| `k8s/base/dbwriter/deployment.yaml` | Module 4: đọc `kol.raw.*`, ghi `kol.social_events` |
+| `k8s/base/collectors/deployment.yaml` | Module 2: collector + PVC cursor Bluesky |
+| `k8s/base/collectors/secret.example.yaml` | Mẫu credential collector (`collector-credentials`) |
 | `k8s/base/kustomization.yaml` | Gom manifest, sinh ConfigMap từ `config/`, `scripts/`, `monitoring/` |
 | `k8s/overlays/dev/` | Heap 512 MB, PVC 2 Gi cho cluster local |
 | `k8s/apps/` | Load generator + HPA, template cho module khác |
@@ -42,6 +52,48 @@ kubectl -n kol-system get pods,pvc,svc
 ```
 
 `k8s/base` dùng file nằm ngoài thư mục `k8s/` (topics, alert rules, dashboard), vì vậy phải render bằng `kubectl kustomize --load-restrictor LoadRestrictionsNone`. `kubectl apply -k k8s/overlays/dev` sẽ báo lỗi; hãy dùng script. Xem manifest sẽ được apply: `./scripts/k8s-deploy.sh dev --dry`.
+
+Lần đầu chạy, script tạo Secret `postgres-credentials` với mật khẩu ngẫu nhiên (`admin-password`, `app-password`, `readonly-password`) và không bao giờ ghi đè Secret đã có. Xem mật khẩu:
+
+```bash
+kubectl -n kol-system get secret postgres-credentials \
+  -o jsonpath='{.data.app-password}' | base64 -d
+```
+
+PostgreSQL trong cluster:
+
+```text
+postgres.kol-system.svc.cluster.local:5432
+  database kol, schema kol
+  kol_app      -> đọc/ghi, dùng cho db-writer
+  kol_readonly -> chỉ SELECT, dùng cho API/dashboard
+```
+
+Dữ liệu nằm trên PVC `data-postgres-0`; xoá PVC là mất dữ liệu. Bảng `kol.social_events` do `dbwriter/schema.sql` tạo, và mỗi lần khởi động `db-writer` sẽ chạy lại `CREATE TABLE IF NOT EXISTS` nên volume cũ vẫn nhận DDL mới.
+
+### Collector và writer
+
+`db-writer` chạy 1 replica, đọc `kol.raw.bluesky/youtube` bằng group `postgres-writer`, ghi vào PostgreSQL. `social-collectors` cũng 1 replica vì Jetstream là một stream có thứ tự: hai pod sẽ ghi trùng event. Deployment dùng chiến lược `Recreate` để hai pod không cùng giữ PVC cursor.
+
+```bash
+# ảnh phải có trong cluster (Docker Desktop dùng chung image)
+./scripts/build-images.sh              # build cả kol-collectors và kol-dbwriter
+
+kubectl -n kol-system logs deploy/social-collectors --tail=20
+kubectl -n kol-system logs deploy/db-writer --tail=20
+kubectl -n kol-system exec deploy/postgres -- \
+  psql -U kol_admin -d kol -c 'SELECT platform, count(*) FROM kol.social_events GROUP BY platform;'
+```
+
+Credential cào dữ liệu là secret tuỳ chọn. Không có secret, collector vẫn chạy và chỉ log việc YouTube bị tắt:
+
+```bash
+kubectl -n kol-system create secret generic collector-credentials \
+  --from-literal=youtube-api-key=KEY
+kubectl -n kol-system rollout restart deploy/social-collectors
+```
+
+> `db-writer` giữ offset Kafka cho tới khi PostgreSQL commit xong, nên PostgreSQL restart không làm mất event. Ngược lại, đừng xoá PVC `social-collectors-cursors` trừ khi muốn bỏ phần dữ liệu Bluesky trong lúc pod đang tắt.
 
 Truy cập:
 

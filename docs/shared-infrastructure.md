@@ -62,10 +62,25 @@ Bảng do `kol_app` tạo sẽ tự động đọc được bằng `kol_readonly
 | Nơi lưu | Thời hạn |
 |---|---|
 | `kol.raw.bluesky` | 3 ngày hoặc 12 GiB, tùy điều kiện nào tới trước |
-| `kol.raw.youtube`, `kol.raw.reddit` | 7 ngày hoặc 1,5 GiB mỗi topic |
+| `kol.raw.youtube` | 7 ngày hoặc 1,5 GiB |
 | PostgreSQL | Lâu dài, sao lưu mỗi ngày |
 
-**Kafka chỉ là bộ đệm.** PostgreSQL chỉ có dữ liệu khi có service đọc từ Kafka và ghi vào. Phần này do module CSDL phụ trách. Trước khi có service đó, dữ liệu cào được sẽ bị xóa khi hết các hạn trên.
+**Kafka chỉ là bộ đệm.** `db-writer` (thư mục [`dbwriter/`](../dbwriter)) đọc `kol.raw.*` và ghi từng event vào bảng `kol.social_events`. Service này được khai báo trong `docker-compose.shared.yml`, nên `./scripts/shared.sh up` bật luôn. Câu lệnh tạo bảng nằm trong [`dbwriter/schema.sql`](../dbwriter/schema.sql): PostgreSQL chạy file này khi volume còn trống, writer cũng chạy lại mỗi lần khởi động nên volume cũ vẫn có bảng mới.
+
+Ghi là at-least-once: offset chỉ được commit sau khi transaction ghi PostgreSQL thành công, mỗi dòng là upsert theo `event_id` nên replay không tạo bản ghi trùng. Message không đọc được đẩy sang `kol.dlq` kèm lý do và payload gốc.
+
+Kiểm tra dữ liệu đã vào DB:
+
+```bash
+# trạng thái writer và số dòng đã lưu
+docker logs --tail=20 kol-db-writer
+docker exec kol-postgres psql -U kol_admin -d kol \
+  -c 'SELECT platform, count(*) FROM kol.social_events GROUP BY platform;'
+
+# 5 bản ghi mới nhất
+docker exec kol-postgres psql -U kol_admin -d kol \
+  -c 'SELECT platform, event_type, kol_id, left(text, 60), created_at FROM kol.social_events ORDER BY created_at DESC LIMIT 5;'
+```
 
 Giới hạn dung lượng nằm trong [`config/topics.conf`](../config/topics.conf), tính theo từng partition của từng bản sao. Toàn bộ topic chiếm tối đa khoảng 60 GiB trên đĩa máy chủ.
 

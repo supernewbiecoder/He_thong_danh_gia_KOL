@@ -62,7 +62,7 @@ Script `scripts/chaos-broker-failure.sh` minh họa các kịch bản này.
 
 - **Tên topic** theo dạng `<domain>.<stage>.<source>`: `kol.raw.bluesky`, `kol.metrics.kol-scores`.
 - **Một topic cho mỗi nguồn**: mỗi nguồn có tốc độ khác nhau (firehose >> API có quota), retention khác nhau, và consumer có thể chỉ đọc nguồn mình cần.
-- **Số partition**: Bluesky 6 (tải cao nhất), YouTube/Reddit 3 (bị giới hạn bởi API quota). Số partition là **giới hạn trên của số consumer song song**, chỉ tăng được, không giảm được.
+- **Số partition**: Bluesky 6 (tải cao nhất), YouTube 3 (bị giới hạn bởi API quota). Số partition là **giới hạn trên của số consumer song song**, chỉ tăng được, không giảm được.
 - **Message key = `kol_id`**: mọi event của một KOL vào cùng partition, nên consumer tính điểm cho KOL đó theo đúng thứ tự và có thể giữ state trong RAM mà không cần đồng bộ giữa các consumer.
 - `kol.metrics.kol-scores` dùng **log compaction**: chỉ giữ giá trị mới nhất cho mỗi KOL, đóng vai trò "bảng điểm" có thể đọc lại từ đầu bất cứ lúc nào.
 - `kol.dlq`: message không parse/xử lý được được đẩy sang đây thay vì chặn cả partition.

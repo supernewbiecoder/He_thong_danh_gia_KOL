@@ -1,0 +1,32 @@
+# Headless service: stable DNS for the StatefulSet pod
+# (postgres-0.postgres-headless.kol-system.svc.cluster.local).
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres-headless
+  labels:
+    app.kubernetes.io/name: postgres
+spec:
+  clusterIP: None
+  selector:
+    app.kubernetes.io/name: postgres
+  ports:
+    - name: postgres
+      port: 5432
+      targetPort: postgres
+---
+# Bootstrap service for clients in the cluster: postgres.kol-system.svc.cluster.local:5432
+# db-writer and the API use this name, so they never depend on a pod IP.
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+  labels:
+    app.kubernetes.io/name: postgres
+spec:
+  selector:
+    app.kubernetes.io/name: postgres
+  ports:
+    - name: postgres
+      port: 5432
+      targetPort: postgres

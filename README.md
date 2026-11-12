@@ -1,6 +1,6 @@
 # Hệ thống Đánh giá KOL & Phân tích Tương tác Mạng Xã hội Thời gian thực
 
-Hệ thống phân tán thu thập bài đăng/bình luận từ **Bluesky Firehose, YouTube Data API v3, Reddit API**, đệm qua **Kafka cluster**, xử lý luồng in-memory để tính điểm tương tác KOL và từ khóa/hashtag thịnh hành, lưu kết quả vào DB có replication và hiển thị trên dashboard gần thời gian thực.
+Hệ thống phân tán thu thập bài đăng/bình luận từ **Bluesky Firehose, YouTube Data API v3**, đệm qua **Kafka cluster**, xử lý luồng in-memory để tính điểm tương tác KOL và từ khóa/hashtag thịnh hành, lưu kết quả vào DB có replication và hiển thị trên dashboard gần thời gian thực.
 
 Repo này hiện chứa **Module 1 – Hạ tầng phân tán**: Kafka cluster, môi trường container (Docker Compose) và Kubernetes, giám sát và kiểm thử chịu tải. Các module khác kết nối vào hạ tầng này theo [docs/integration-guide.md](docs/integration-guide.md).
 
@@ -9,7 +9,6 @@ flowchart LR
     subgraph M2[Module 2 - Thu thập]
         BS[Bluesky worker]
         YT[YouTube worker]
-        RD[Reddit worker]
     end
     subgraph M1[Module 1 - Hạ tầng]
         direction TB
@@ -29,7 +28,7 @@ flowchart LR
     DB[(Module 4 - DB replica set)]
     API[Module 5 - REST API + Dashboard]
 
-    BS & YT & RD -->|kol.raw.*| K
+    BS & YT -->|kol.raw.*| K
     K -->|kol.raw.*| SC
     SC -->|kol.metrics.*| K
     SC --> DB
@@ -85,7 +84,6 @@ Dừng: `docker compose down` (giữ dữ liệu) · `docker compose down -v` (x
 |---|---|---|
 | `kol.raw.bluesky` | 6 | Module 2 → Module 3 |
 | `kol.raw.youtube` | 3 | Module 2 → Module 3 |
-| `kol.raw.reddit` | 3 | Module 2 → Module 3 |
 | `kol.metrics.kol-scores` (compacted, key = `kol_id`) | 3 | Module 3 → Module 4/5 |
 | `kol.metrics.keywords` | 3 | Module 3 → Module 4/5 |
 | `kol.dlq` | 3 | mọi module (message lỗi) |
@@ -97,6 +95,35 @@ Tất cả topic có RF = 3 và `min.insync.replicas = 2`, và có giới hạn 
 ## Hạ tầng dùng chung của nhóm
 
 Kafka và PostgreSQL chạy trên máy của một thành viên, cả nhóm truy cập qua Tailscale. Trên máy đó chỉ cần chạy `./scripts/shared.sh up`. Cách kết nối, tài khoản, sao lưu và giới hạn: [docs/shared-infrastructure.md](docs/shared-infrastructure.md).
+
+Trên máy chủ đó, `shared.sh up` cũng bật `social-collectors` (cào dữ liệu) và `db-writer` (đọc `kol.raw.*` rồi ghi vào `kol.social_events` trong PostgreSQL). Dữ liệu vì vậy nằm ở một chỗ và cả nhóm dùng chung:
+
+```bash
+docker logs --tail=20 kol-db-writer
+docker exec kol-postgres psql -U kol_admin -d kol -c 'SELECT platform, count(*) FROM kol.social_events GROUP BY platform;'
+```
+
+Collector trên máy chủ đọc cấu hình từ `.env.shared`, không phải `.env`. Lần đầu tạo file đó, `shared.sh` tự chép `YOUTUBE_API_KEY`, `YOUTUBE_CHANNEL_IDS`, `YOUTUBE_SEARCH_QUERIES`, `BLUESKY_HANDLES` từ `.env` sang. Nếu bỏ trống `YOUTUBE_API_KEY`, script in cảnh báo và chỉ Bluesky được thu thập:
+
+```bash
+./scripts/shared.sh info     # in lại thông tin kết nối + cảnh báo nếu thiếu key
+```
+
+## Thu thập dữ liệu (Module 2)
+
+Collector chạy dưới profile `collectors` (Compose) hoặc Deployment `social-collectors` (K8s):
+
+```env
+COLLECTORS=bluesky,youtube
+YOUTUBE_SEARCH_QUERIES=music,technology,football,entertainment,celebrity,politics
+YOUTUBE_CHANNEL_IDS=
+YOUTUBE_INCLUDE_COMMENTS=true
+```
+
+- **YouTube**: tìm video theo chủ đề hoặc theo `YOUTUBE_CHANNEL_IDS`, phân trang bằng `nextPageToken`. Mỗi video lấy `snippet,statistics,contentDetails,topicDetails,liveStreamingDetails` nên có thêm `topics`, `content_details` (duration/caption/definition) và `live_viewers`. `channels.list` bổ sung subscriber/video/tổng view vào `author.followers`, `author_videos`, `author_total_views`. Comment lấy khi `YOUTUBE_INCLUDE_COMMENTS=true`; reply lấy khi `YOUTUBE_INCLUDE_REPLIES=true` (tốn thêm quota). Giới hạn trang tách riêng: `YOUTUBE_SEARCH_MAX_PAGES` và `YOUTUBE_COMMENT_MAX_PAGES`.
+- **Bluesky**: Jetstream firehose toàn mạng (post/reply/like/repost/follow/delete), tự reconnect, enrichment nội dung bài gốc cho like/repost. Mỗi bài có `media` (ảnh/video/link/bài trích dẫn), `facets` + `links` (tag/mention/link có offset chính xác từ nền tảng), `root_id` để dựng lại thread, và `cid`/`rev` để phát hiện bài bị sửa. Handle, tên hiển thị và follower count được lấy theo lô 25 DID/lần gọi và cache theo `BLUESKY_AUTHOR_CACHE_SECONDS`.
+
+Cursor firehose chỉ được ghi **sau khi Kafka xác nhận** toàn bộ message trước nó, theo lô `BLUESKY_FLUSH_EVERY` event hoặc mỗi `BLUESKY_FLUSH_SECONDS` giây. Nếu có delivery lỗi, cursor giữ nguyên giá trị đã xác nhận, nên lần khởi động sau đọc lại từ đó và sinh vài event trùng (db-writer upsert theo `event_id`) thay vì mất dữ liệu. Payload hỏng hoặc không chuẩn hóa được đẩy sang `kol.dlq`, luồng thu thập vẫn tiếp tục.
 
 ## Kiểm thử chịu tải
 
@@ -140,6 +167,8 @@ Chi tiết (auto-healing, scale, KEDA theo lag, truy cập từ ngoài): [docs/k
 │   ├── postgres/init/          # tạo tài khoản và schema PostgreSQL
 │   └── schemas/                # JSON schema của event chuẩn hóa
 ├── docker/kafka/               # image Kafka + JMX exporter + rules
+├── collectors/                 # Module 2: YouTube / Bluesky -> Kafka
+├── dbwriter/                   # Module 4: Kafka -> PostgreSQL (schema.sql + consumer)
 ├── loadtest/                   # load generator (Python) + Dockerfile
 ├── monitoring/
 │   ├── prometheus/             # prometheus.yml (Compose) + alerts.yml (dùng chung)
@@ -178,7 +207,7 @@ Chi tiết (auto-healing, scale, KEDA theo lag, truy cập từ ngoài): [docs/k
 | Module | Nội dung |
 |---|---|
 | 1. Hạ tầng phân tán | Kafka cluster, container/Kubernetes, giám sát chịu tải *(repo này)* |
-| 2. Thu thập dữ liệu | Worker đa luồng Bluesky / YouTube / Reddit → Kafka |
+| 2. Thu thập dữ liệu | Worker đa luồng Bluesky / YouTube → Kafka |
 | 3. Stream consumer | Tần suất keyword/hashtag, điểm tương tác KOL |
 | 4. CSDL chịu lỗi | Schema, cluster replication, failover |
 | 5. API & trực quan hóa | REST API + web dashboard |
