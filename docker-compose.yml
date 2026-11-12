@@ -218,12 +218,53 @@ services:
         condition: service_completed_successfully
     restart: unless-stopped
 
+  # ---------------------------------------------------------------- Collectors (profile: collectors)
+  social-collectors:
+    build: ./collectors
+    image: kol-collectors:1.0.0
+    profiles: ["collectors"]
+    environment:
+      BOOTSTRAP_SERVERS: kafka-1:19092,kafka-2:19092,kafka-3:19092
+      COLLECTORS: ${COLLECTORS:-bluesky,youtube}
+      COLLECTOR_POLL_SECONDS: ${COLLECTOR_POLL_SECONDS:-60}
+      COLLECTOR_HTTP_TIMEOUT: ${COLLECTOR_HTTP_TIMEOUT:-20}
+      COLLECTOR_DEDUPE_CACHE: ${COLLECTOR_DEDUPE_CACHE:-50000}
+      BLUESKY_HANDLES: ${BLUESKY_HANDLES:-}
+      BLUESKY_MODE: ${BLUESKY_MODE:-firehose}
+      BLUESKY_FIREHOSE_URL: ${BLUESKY_FIREHOSE_URL:-wss://jetstream1.us-east.bsky.network/subscribe}
+      BLUESKY_COLLECTIONS: ${BLUESKY_COLLECTIONS:-app.bsky.feed.post,app.bsky.feed.like,app.bsky.feed.repost}
+      BLUESKY_ENRICH_INTERACTIONS: ${BLUESKY_ENRICH_INTERACTIONS:-true}
+      BLUESKY_ENRICH_AUTHORS: ${BLUESKY_ENRICH_AUTHORS:-true}
+      BLUESKY_AUTHOR_CACHE_SECONDS: ${BLUESKY_AUTHOR_CACHE_SECONDS:-3600}
+      BLUESKY_PUBLISH_BATCH: ${BLUESKY_PUBLISH_BATCH:-25}
+      BLUESKY_POST_CACHE_SIZE: ${BLUESKY_POST_CACHE_SIZE:-100000}
+      BLUESKY_CURSOR_FILE: /data/bluesky-cursor.json
+      BLUESKY_RECONNECT_SECONDS: ${BLUESKY_RECONNECT_SECONDS:-5}
+      BLUESKY_FLUSH_EVERY: ${BLUESKY_FLUSH_EVERY:-500}
+      BLUESKY_FLUSH_SECONDS: ${BLUESKY_FLUSH_SECONDS:-5}
+      YOUTUBE_API_KEY: ${YOUTUBE_API_KEY:-}
+      YOUTUBE_CHANNEL_IDS: ${YOUTUBE_CHANNEL_IDS:-}
+      YOUTUBE_SEARCH_QUERIES: ${YOUTUBE_SEARCH_QUERIES:-}
+      YOUTUBE_INCLUDE_COMMENTS: ${YOUTUBE_INCLUDE_COMMENTS:-false}
+      YOUTUBE_SEARCH_MAX_PAGES: ${YOUTUBE_SEARCH_MAX_PAGES:-5}
+      YOUTUBE_COMMENT_MAX_PAGES: ${YOUTUBE_COMMENT_MAX_PAGES:-5}
+      YOUTUBE_INCLUDE_REPLIES: ${YOUTUBE_INCLUDE_REPLIES:-false}
+      YOUTUBE_MAX_REPLY_PAGES: ${YOUTUBE_MAX_REPLY_PAGES:-1}
+      YOUTUBE_MAX_PAGES: ${YOUTUBE_MAX_PAGES:-5}
+    volumes:
+      - bluesky-cursor-data:/data
+    depends_on:
+      kafka-init:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
 volumes:
   kafka-1-data:
   kafka-2-data:
   kafka-3-data:
   prometheus-data:
   grafana-data:
+  bluesky-cursor-data:
 
 networks:
   default:

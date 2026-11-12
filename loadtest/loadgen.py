@@ -39,7 +39,7 @@ CONSUMED = Counter("loadgen_messages_consumed", "Messages consumed", ["topic"])
 E2E_LATENCY = Histogram("loadgen_e2e_latency_seconds", "Record CreateTime -> consumed", buckets=LATENCY_BUCKETS)
 TARGET_RATE = Gauge("loadgen_target_rate", "Configured target rate (msg/s, 0 = unlimited)")
 
-PLATFORMS = ("bluesky", "youtube", "reddit")
+PLATFORMS = ("bluesky", "youtube")
 EVENT_TYPES = ("post", "comment", "reply")
 HASHTAGS = ("#review", "#unboxing", "#skincare", "#gaming", "#food", "#travel", "#tech",
             "#fashion", "#music", "#vlog", "#livestream", "#giveaway", "#ootd", "#fitness")
