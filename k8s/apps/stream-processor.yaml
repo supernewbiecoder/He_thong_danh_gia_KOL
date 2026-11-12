@@ -1,0 +1,76 @@
+# Module 3 - Stream Processor Deployment & HPA
+# Deploy with: kubectl apply -n kol-system -f k8s/apps/stream-processor.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: stream-processor
+  namespace: kol-system
+  labels:
+    app.kubernetes.io/name: stream-processor
+    app.kubernetes.io/part-of: kol-platform
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: stream-processor
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: stream-processor
+        app.kubernetes.io/part-of: kol-platform
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8000"
+    spec:
+      terminationGracePeriodSeconds: 30
+      containers:
+        - name: stream-processor
+          image: kol-stream-processor:1.0.0
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: metrics
+              containerPort: 8000
+          env:
+            - name: BOOTSTRAP_SERVERS
+              value: kafka:9092
+            - name: KAFKA_GROUP_ID
+              value: stream-processor
+            - name: INPUT_TOPICS
+              value: kol.raw.bluesky,kol.raw.youtube
+            - name: SCORES_TOPIC
+              value: kol.metrics.kol-scores
+            - name: KEYWORDS_TOPIC
+              value: kol.metrics.keywords
+            - name: DLQ_TOPIC
+              value: kol.dlq
+            - name: WINDOW_MINUTES
+              value: "15"
+            - name: FLUSH_INTERVAL_SEC
+              value: "5"
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: stream-processor
+  namespace: kol-system
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: stream-processor
+  minReplicas: 1
+  maxReplicas: 6
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70

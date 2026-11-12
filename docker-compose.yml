@@ -183,6 +183,26 @@ services:
       - prometheus
     restart: unless-stopped
 
+  # ---------------------------------------------------------------- Module 3: Stream Processor (profile: processor)
+  stream-processor:
+    build: ./processor
+    image: kol-stream-processor:1.0.0
+    profiles: ["processor"]
+    environment:
+      BOOTSTRAP_SERVERS: kafka-1:19092,kafka-2:19092,kafka-3:19092
+      KAFKA_GROUP_ID: ${PROCESSOR_GROUP_ID:-stream-processor}
+      INPUT_TOPICS: ${PROCESSOR_INPUT_TOPICS:-kol.raw.bluesky,kol.raw.youtube}
+      SCORES_TOPIC: ${PROCESSOR_SCORES_TOPIC:-kol.metrics.kol-scores}
+      KEYWORDS_TOPIC: ${PROCESSOR_KEYWORDS_TOPIC:-kol.metrics.keywords}
+      DLQ_TOPIC: ${PROCESSOR_DLQ_TOPIC:-kol.dlq}
+      WINDOW_MINUTES: ${PROCESSOR_WINDOW_MINUTES:-15}
+      FLUSH_INTERVAL_SEC: ${PROCESSOR_FLUSH_INTERVAL_SEC:-5}
+      METRICS_PORT: "8000"
+    depends_on:
+      kafka-init:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
   # ---------------------------------------------------------------- Load testing (profile: loadtest)
   loadgen-producer:
     build: ./loadtest

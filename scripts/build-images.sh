@@ -8,13 +8,14 @@ source "$(dirname "$0")/lib.sh"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 
 KAFKA_VERSION="${KAFKA_VERSION:-3.9.0}"
-IMAGES=("kol-kafka:${KAFKA_VERSION}" "kol-loadgen:1.0.0" "kol-collectors:1.0.0" "kol-dbwriter:1.0.0")
+IMAGES=("kol-kafka:${KAFKA_VERSION}" "kol-loadgen:1.0.0" "kol-collectors:1.0.0" "kol-dbwriter:1.0.0" "kol-stream-processor:1.0.0")
 
 step "Building images"
 docker build --build-arg KAFKA_VERSION="$KAFKA_VERSION" -t "kol-kafka:${KAFKA_VERSION}" "$ROOT/docker/kafka"
 docker build -t kol-loadgen:1.0.0 "$ROOT/loadtest"
 docker build -t kol-collectors:1.0.0 "$ROOT/collectors"
 docker build -t kol-dbwriter:1.0.0 "$ROOT/dbwriter"
+docker build -t kol-stream-processor:1.0.0 "$ROOT/processor"
 
 case "${1:-}" in
   kind)
