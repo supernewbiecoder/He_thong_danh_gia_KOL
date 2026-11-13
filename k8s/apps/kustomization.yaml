@@ -12,3 +12,4 @@ labels:
 resources:
   - loadgen.yaml
   - loadgen-consumer-hpa.yaml
+  - stream-processor.yaml

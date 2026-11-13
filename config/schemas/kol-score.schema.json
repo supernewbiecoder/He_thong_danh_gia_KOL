@@ -1,0 +1,114 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://kol-platform.local/schemas/kol-score.schema.json",
+  "title": "KOLScoreMetric",
+  "description": "Aggregated KOL engagement metrics and score published by Module 3 (stream-processor) to kol.metrics.kol-scores. Message key = kol_id (compacted topic keeps latest record per KOL).",
+  "type": "object",
+  "required": [
+    "kol_id",
+    "platform",
+    "total_events",
+    "window_events",
+    "window_minutes",
+    "metrics_total",
+    "metrics_window",
+    "engagement_score",
+    "window_score",
+    "velocity_per_min",
+    "updated_at"
+  ],
+  "properties": {
+    "kol_id": {
+      "type": "string",
+      "description": "<platform>:<native account id> of the KOL being evaluated"
+    },
+    "platform": {
+      "enum": ["bluesky", "youtube"]
+    },
+    "handle": {
+      "type": ["string", "null"],
+      "description": "Latest observed handle or display name if available"
+    },
+    "followers": {
+      "type": ["integer", "null"],
+      "minimum": 0,
+      "description": "Latest observed follower count if available"
+    },
+    "total_events": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Cumulative events processed for this KOL since processor start"
+    },
+    "window_events": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Events observed for this KOL within the active sliding window"
+    },
+    "window_minutes": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Duration of the sliding window in minutes"
+    },
+    "event_breakdown": {
+      "type": "object",
+      "properties": {
+        "post": { "type": "integer", "minimum": 0 },
+        "comment": { "type": "integer", "minimum": 0 },
+        "reply": { "type": "integer", "minimum": 0 },
+        "like": { "type": "integer", "minimum": 0 },
+        "repost": { "type": "integer", "minimum": 0 },
+        "follow": { "type": "integer", "minimum": 0 },
+        "delete": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "metrics_total": {
+      "type": "object",
+      "required": ["likes", "shares", "comments", "views"],
+      "properties": {
+        "likes": { "type": "integer", "minimum": 0 },
+        "shares": { "type": "integer", "minimum": 0 },
+        "comments": { "type": "integer", "minimum": 0 },
+        "views": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "metrics_window": {
+      "type": "object",
+      "required": ["likes", "shares", "comments", "views"],
+      "properties": {
+        "likes": { "type": "integer", "minimum": 0 },
+        "shares": { "type": "integer", "minimum": 0 },
+        "comments": { "type": "integer", "minimum": 0 },
+        "views": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "engagement_score": {
+      "type": "number",
+      "minimum": 0,
+      "description": "Cumulative weighted engagement score for this KOL"
+    },
+    "window_score": {
+      "type": "number",
+      "minimum": 0,
+      "description": "Weighted engagement score within the sliding window"
+    },
+    "velocity_per_min": {
+      "type": "number",
+      "minimum": 0,
+      "description": "Average window engagement score per minute (window_score / window_minutes)"
+    },
+    "top_hashtags": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Most frequent hashtags associated with this KOL"
+    },
+    "last_event_at": {
+      "type": ["string", "null"],
+      "format": "date-time"
+    },
+    "updated_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "UTC timestamp when this score snapshot was emitted"
+    }
+  }
+}

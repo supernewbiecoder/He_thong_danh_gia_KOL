@@ -1,0 +1,65 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://kol-platform.local/schemas/keyword-metric.schema.json",
+  "title": "KeywordMetric",
+  "description": "Trending keyword / hashtag frequency metric published by Module 3 (stream-processor) to kol.metrics.keywords. Message key = keyword.",
+  "type": "object",
+  "required": [
+    "keyword",
+    "is_hashtag",
+    "count",
+    "total_count",
+    "window_minutes",
+    "platforms",
+    "unique_kols",
+    "updated_at"
+  ],
+  "properties": {
+    "keyword": {
+      "type": "string",
+      "description": "Normalized lowercase keyword or hashtag (without leading #)"
+    },
+    "is_hashtag": {
+      "type": "boolean",
+      "description": "True if extracted from hashtags or #-prefixed token"
+    },
+    "count": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Occurrences inside the sliding window"
+    },
+    "total_count": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Cumulative occurrences since processor start"
+    },
+    "window_minutes": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Sliding window length in minutes"
+    },
+    "velocity_per_min": {
+      "type": "number",
+      "minimum": 0,
+      "description": "Occurrences per minute within the sliding window"
+    },
+    "platforms": {
+      "type": "object",
+      "description": "Window count breakdown by platform",
+      "properties": {
+        "bluesky": { "type": "integer", "minimum": 0 },
+        "youtube": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "unique_kols": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Number of distinct KOLs associated with this keyword in the current window"
+    },
+    "updated_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "UTC timestamp when this keyword snapshot was emitted"
+    }
+  }
+}

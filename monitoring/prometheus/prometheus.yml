@@ -37,3 +37,11 @@ scrape_configs:
         type: A
         port: 8000
         refresh_interval: 15s
+
+  # Module 3 Stream Processor metrics (when `processor` profile runs, supports --scale stream-processor=N)
+  - job_name: stream-processor
+    dns_sd_configs:
+      - names: ["stream-processor"]
+        type: A
+        port: 8000
+        refresh_interval: 15s

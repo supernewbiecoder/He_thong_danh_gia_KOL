@@ -125,6 +125,18 @@ YOUTUBE_INCLUDE_COMMENTS=true
 
 Cursor firehose chỉ được ghi **sau khi Kafka xác nhận** toàn bộ message trước nó, theo lô `BLUESKY_FLUSH_EVERY` event hoặc mỗi `BLUESKY_FLUSH_SECONDS` giây. Nếu có delivery lỗi, cursor giữ nguyên giá trị đã xác nhận, nên lần khởi động sau đọc lại từ đó và sinh vài event trùng (db-writer upsert theo `event_id`) thay vì mất dữ liệu. Payload hỏng hoặc không chuẩn hóa được đẩy sang `kol.dlq`, luồng thu thập vẫn tiếp tục.
 
+## Xử lý luồng thời gian thực (Module 3)
+
+Stream processor (`processor/`) đọc từ `kol.raw.bluesky` và `kol.raw.youtube` (`group.id = stream-processor`, at-least-once), lọc trùng bằng LRU cache `event_id`, tính điểm tương tác KOL và đếm tần suất từ khóa/hashtag trong cửa sổ trượt 15 phút, định kỳ mỗi 5 giây đẩy bản ghi cập nhật ra `kol.metrics.kol-scores` và `kol.metrics.keywords`:
+
+```bash
+docker compose --profile processor up -d --build
+docker compose logs -f stream-processor
+python processor/view_leaderboard.py          # xem bảng xếp hạng KOL & top từ khóa từ Kafka
+```
+
+Chi tiết kiến trúc, công thức tính điểm và schema đầu ra: [docs/module-3-stream-processor.md](docs/module-3-stream-processor.md).
+
 ## Kiểm thử chịu tải
 
 ```bash
@@ -168,6 +180,7 @@ Chi tiết (auto-healing, scale, KEDA theo lag, truy cập từ ngoài): [docs/k
 │   └── schemas/                # JSON schema của event chuẩn hóa
 ├── docker/kafka/               # image Kafka + JMX exporter + rules
 ├── collectors/                 # Module 2: YouTube / Bluesky -> Kafka
+├── processor/                  # Module 3: Stream consumer tính điểm KOL & từ khóa thịnh hành
 ├── dbwriter/                   # Module 4: Kafka -> PostgreSQL (schema.sql + consumer)
 ├── loadtest/                   # load generator (Python) + Dockerfile
 ├── monitoring/
@@ -187,6 +200,7 @@ Chi tiết (auto-healing, scale, KEDA theo lag, truy cập từ ngoài): [docs/k
 - [docs/shared-infrastructure.md](docs/shared-infrastructure.md): **hạ tầng dùng chung**: kết nối từ xa, PostgreSQL, sao lưu
 - [docs/architecture.md](docs/architecture.md): thiết kế hạ tầng và các quyết định kỹ thuật (KRaft, RF/ISR, partition, listener)
 - [docs/integration-guide.md](docs/integration-guide.md): **dành cho các module khác**: kết nối Kafka, cấu hình producer/consumer, format message
+- [docs/module-3-stream-processor.md](docs/module-3-stream-processor.md): **Module 3 (Stream Processor)**: công thức tính điểm KOL, sliding window, schema đầu ra
 - [docs/kubernetes.md](docs/kubernetes.md): triển khai, auto-healing, auto-scaling
 - [docs/monitoring-and-load-testing.md](docs/monitoring-and-load-testing.md): metrics, alert, kịch bản load test và chaos test
 
