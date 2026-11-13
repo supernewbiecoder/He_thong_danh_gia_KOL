@@ -1,5 +1,7 @@
 # Hạ tầng dùng chung của nhóm
 
+> **Kubernetes là cách chạy chính.** Tài liệu này mô tả cách dùng chung bằng Docker Compose. Với Kubernetes, xem [HDSD.md mục 6](../HDSD.md#6-dùng-chung-cả-nhóm-qua-tailscale) và [docs/kubernetes.md](kubernetes.md#4-truy-cập-từ-máy).
+
 Kafka và PostgreSQL chạy trên **máy của một thành viên** (gọi là máy chủ). Các thành viên khác kết nối qua mạng riêng [Tailscale](https://tailscale.com), nên dữ liệu cào được nằm ở một chỗ và cả nhóm cùng dùng.
 
 ```

@@ -84,5 +84,25 @@ services:
         condition: service_completed_successfully
     restart: unless-stopped
 
+  # Stores the results of Module 3 (kol.metrics.*) in kol.kol_scores / kol_score_history /
+  # keyword_metrics. Same image as db-writer, different entry point.
+  metrics-writer:
+    image: kol-dbwriter:1.0.0
+    container_name: kol-metrics-writer
+    command: ["python", "metrics_writer.py"]
+    environment:
+      BOOTSTRAP_SERVERS: kafka-1:19092,kafka-2:19092,kafka-3:19092
+      DATABASE_URL: postgresql://kol_app:${POSTGRES_APP_PASSWORD:?set it in .env.shared}@postgres:5432/kol
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    depends_on:
+      db-writer:
+        condition: service_started
+    restart: unless-stopped
+
+  # Module 3 restores each KOL's cumulative totals from kol.kol_scores after a restart.
+  stream-processor:
+    environment:
+      DATABASE_URL: postgresql://kol_app:${POSTGRES_APP_PASSWORD:?set it in .env.shared}@postgres:5432/kol
+
 volumes:
   postgres-data:

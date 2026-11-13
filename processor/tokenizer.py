@@ -8,6 +8,14 @@ URL_RE = re.compile(r"https?://\S+|www\.\S+", re.IGNORECASE)
 MENTION_RE = re.compile(r"@[\w.-]+")
 HASHTAG_IN_TEXT_RE = re.compile(r"#([\w\d_À-ỹ]+)", re.UNICODE)
 WORD_RE = re.compile(r"[\wÀ-ỹ]{3,}", re.UNICODE)
+# Letters that only exist in Vietnamese: their presence marks a Vietnamese text even without `lang`.
+VIETNAMESE_RE = re.compile(
+    r"[àáạảãâầấậẩẫăằắặẳẵèéẹẻẽêềếệểễìíịỉĩòóọỏõôồốộổỗơờớợởỡùúụủũưừứựửữỳýỵỷỹđ]", re.IGNORECASE
+)
+# Vietnamese words are mostly two syllables ("sản phẩm", "làn da"), so phrases are built inside
+# runs of letters only: punctuation and digits end a phrase.
+PHRASE_SPLIT_RE = re.compile(r"[^\w\s]|\d|_", re.UNICODE)
+SYLLABLE_RE = re.compile(r"[^\W\d_]+", re.UNICODE)
 
 # Common Vietnamese & English stopwords to filter out noise when extracting keywords from text
 STOPWORDS: frozenset[str] = frozenset({
@@ -21,10 +29,12 @@ STOPWORDS: frozenset[str] = frozenset({
     "tại", "về", "qua", "lại", "ra", "vào", "lên", "xuống", "đi", "làm", "có",
     "xem", "biết", "nói", "thấy", "muốn", "cần", "phải", "thể", "rồi", "nhé", "nha",
     "ạ", "ơi", "vậy", "sao", "nào", "đâu", "bao", "nhiêu", "mấy", "lúc", "ngày",
+    "sau", "trước", "năm", "tháng", "tuần", "hôm", "nay", "giờ", "mới", "cùng", "tới",
+    "luôn", "thật", "chỉ", "đều", "nhau", "vừa", "hết", "cả", "mọi", "ai", "gì", "này", "kìa",
     # Vietnamese unaccented common words (often used in loadgen / social comments)
     "cua", "nhung", "mot", "nhieu", "trong", "tren", "voi", "cho", "khi", "nay",
     "thi", "duoc", "nhu", "khong", "chua", "nguoi", "minh", "ban", "chung", "anh",
-    "chi", "xem", "biet", "noi", "thay", "muon", "can", "phai", "roi", "nhe", "nha",
+    "xem", "biet", "noi", "thay", "muon", "can", "phai", "roi", "nhe", "nha",
     # English
     "the", "and", "for", "that", "this", "with", "you", "not", "are", "from",
     "your", "all", "have", "new", "more", "an", "was", "we", "will", "home",
@@ -45,6 +55,10 @@ STOPWORDS: frozenset[str] = frozenset({
     "links", "she", "review", "years", "order", "very", "privacy", "book", "items",
     "company", "read", "group", "need", "many", "user", "said", "de", "does",
     "set", "under", "general", "research", "university", "mail", "full",
+    # Fragments left by contractions ("don't" -> "don") and bare domains ("x.com" -> "com")
+    "don", "doesn", "didn", "isn", "aren", "wasn", "weren", "won", "couldn", "shouldn",
+    "wouldn", "haven", "hasn", "com", "org", "net", "www", "http", "https", "amp",
+    "really", "even", "still", "much", "want", "know", "think", "going", "being", "way",
 })
 
 
@@ -52,6 +66,37 @@ def normalize_tag(raw: str) -> str:
     """Clean and normalize a hashtag or keyword (strip leading #, lowercase)."""
     cleaned = raw.strip().lstrip("#").lower()
     return cleaned
+
+
+def is_vietnamese(event: dict, text: str) -> bool:
+    lang = str(event.get("lang") or event.get("default_language") or "").lower()
+    return lang.startswith("vi") or bool(VIETNAMESE_RE.search(text))
+
+
+def vietnamese_keywords(text: str) -> list[str]:
+    """Two-syllable phrases for Vietnamese, where single syllables ("cảm", "tiết") mean nothing.
+
+    Plain ASCII words of 4+ letters (brand and loan words such as "iphone", "review") are kept
+    as single keywords too.
+    """
+    def loanword(word: str) -> bool:
+        return word.isascii() and len(word) >= 4
+
+    keywords: list[str] = []
+    for chunk in PHRASE_SPLIT_RE.split(text):
+        syllables = [s.lower() for s in SYLLABLE_RE.findall(chunk)]
+        for i, syllable in enumerate(syllables):
+            if loanword(syllable) and syllable not in STOPWORDS:
+                keywords.append(syllable)
+            if i + 1 < len(syllables):
+                nxt = syllables[i + 1]
+                if syllable in STOPWORDS or nxt in STOPWORDS or len(syllable) < 2 or len(nxt) < 2:
+                    continue
+                # "chi tiết iphone" must not yield "tiết iphone": a loanword pairs only with ASCII.
+                if (loanword(syllable) and not nxt.isascii()) or (loanword(nxt) and not syllable.isascii()):
+                    continue
+                keywords.append(f"{syllable} {nxt}")
+    return keywords
 
 
 def extract_keywords_and_hashtags(
@@ -105,6 +150,14 @@ def extract_keywords_and_hashtags(
     cleaned_text = URL_RE.sub(" ", text)
     cleaned_text = MENTION_RE.sub(" ", cleaned_text)
     cleaned_text = HASHTAG_IN_TEXT_RE.sub(" ", cleaned_text)
+
+    if is_vietnamese(event, cleaned_text):
+        for phrase in vietnamese_keywords(cleaned_text):
+            if phrase not in results:
+                results[phrase] = False
+            if len(results) >= max_keywords_per_event:
+                break
+        return list(results.items())[:max_keywords_per_event]
 
     for match in WORD_RE.finditer(cleaned_text):
         word = match.group(0).lower().strip("_")

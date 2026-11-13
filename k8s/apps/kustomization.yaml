@@ -1,4 +1,4 @@
-# Workloads that run on top of the infrastructure (load test + auto-scaling demo).
+# Load test and auto-scaling demo on top of the platform (Module 3 itself is in k8s/base).
 # Deploy after scripts/k8s-deploy.sh:  kubectl apply -k k8s/apps
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
@@ -12,4 +12,3 @@ labels:
 resources:
   - loadgen.yaml
   - loadgen-consumer-hpa.yaml
-  - stream-processor.yaml

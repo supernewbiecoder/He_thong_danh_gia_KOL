@@ -1,0 +1,67 @@
+# PostgreSQL with streaming replication and automatic failover, managed by the CloudNativePG
+# operator (installed by scripts/k8s-deploy.sh).
+#
+#   3 instances = 1 primary + 2 replicas, each with its own PVC.
+#   If the primary dies, the operator promotes a replica within seconds and repoints the services:
+#     kol-db-rw  read/write, always the primary   -> db-writer, metrics-writer, stream-processor
+#     kol-db-ro  read-only, replicas only          -> Grafana, API (Module 5)
+#     kol-db-r   any instance
+#
+# Passwords come from three basic-auth Secrets created once by k8s-deploy.sh (never in git):
+#   kol-db-app (kol_app), kol-db-readonly (kol_readonly), kol-db-superuser (postgres)
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: kol-db
+spec:
+  instances: 3
+  imageName: ghcr.io/cloudnative-pg/postgresql:16.6
+  primaryUpdateStrategy: unsupervised
+  # On a graceful stop PostgreSQL waits for clients to disconnect (default 180s) before the
+  # operator promotes a replica. The writers reconnect on their own, so 15s is enough.
+  smartShutdownTimeout: 15
+
+  enableSuperuserAccess: true
+  superuserSecret:
+    name: kol-db-superuser
+
+  bootstrap:
+    initdb:
+      database: kol
+      owner: kol_app
+      secret:
+        name: kol-db-app
+      # Roles, schema `kol`, grants, then the tables. Same DDL as Docker Compose and db-writer.
+      postInitApplicationSQLRefs:
+        configMapRefs:
+          - name: postgres-init
+            key: 01-init.sql
+          - name: postgres-init
+            key: 02-schema.sql
+
+  managed:
+    roles:
+      - name: kol_readonly
+        ensure: present
+        login: true
+        passwordSecret:
+          name: kol-db-readonly
+
+  postgresql:
+    parameters:
+      max_connections: "100"
+      shared_buffers: 128MB
+
+  storage:
+    size: 5Gi
+
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      memory: 1Gi
+
+  # One instance per node when the cluster has several nodes.
+  affinity:
+    podAntiAffinityType: preferred

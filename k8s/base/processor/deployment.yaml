@@ -1,13 +1,15 @@
-# Module 3 - Stream Processor Deployment & HPA
-# Deploy with: kubectl apply -n kol-system -f k8s/apps/stream-processor.yaml
+# Module 3 - Stream Processor: KOL scores and trending keywords, in RAM, published to kol.metrics.*
+#
+# Scale: pods in group stream-processor share the 9 input partitions (6 Bluesky + 3 YouTube), so
+# more than 9 replicas would sit idle. Every KOL lives in exactly one pod because the message key
+# is kol_id; on a rebalance the new owner restores the KOL's totals from PostgreSQL (kol_scores).
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: stream-processor
-  namespace: kol-system
   labels:
     app.kubernetes.io/name: stream-processor
-    app.kubernetes.io/part-of: kol-platform
+    app.kubernetes.io/component: processor
 spec:
   replicas: 2
   selector:
@@ -17,11 +19,13 @@ spec:
     metadata:
       labels:
         app.kubernetes.io/name: stream-processor
-        app.kubernetes.io/part-of: kol-platform
+        app.kubernetes.io/component: processor
       annotations:
         prometheus.io/scrape: "true"
         prometheus.io/port: "8000"
+        prometheus.io/job: stream-processor
     spec:
+      # Time to flush the in-memory state and commit offsets on SIGTERM.
       terminationGracePeriodSeconds: 30
       containers:
         - name: stream-processor
@@ -47,19 +51,37 @@ spec:
               value: "15"
             - name: FLUSH_INTERVAL_SEC
               value: "5"
+            # Bounds memory: the firehose sees millions of accounts. Evicted KOLs are restored
+            # from PostgreSQL when they show up again.
+            - name: MAX_ACTIVE_KOLS
+              value: "50000"
+            - name: MIN_KEYWORD_KOLS
+              value: "2"
+            - name: POSTGRES_APP_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: kol-db-app
+                  key: password
+            - name: DATABASE_URL
+              value: postgresql://kol_app:$(POSTGRES_APP_PASSWORD)@kol-db-rw:5432/kol
+          readinessProbe:
+            httpGet:
+              path: /metrics
+              port: metrics
+            initialDelaySeconds: 5
+            periodSeconds: 15
           resources:
             requests:
               cpu: 100m
-              memory: 128Mi
+              memory: 192Mi
             limits:
-              cpu: 500m
-              memory: 512Mi
+              cpu: "1"
+              memory: 768Mi
 ---
 apiVersion: autoscaling/v2
 kind: HorizontalPodAutoscaler
 metadata:
   name: stream-processor
-  namespace: kol-system
 spec:
   scaleTargetRef:
     apiVersion: apps/v1
@@ -74,3 +96,7 @@ spec:
         target:
           type: Utilization
           averageUtilization: 70
+  behavior:
+    scaleDown:
+      # Every scale event is a consumer group rebalance: scale down slowly.
+      stabilizationWindowSeconds: 180

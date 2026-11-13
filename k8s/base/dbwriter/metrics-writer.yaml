@@ -1,0 +1,48 @@
+# Module 4: stores the results of Module 3 (kol.metrics.*) in PostgreSQL:
+#   kol.kol_scores (latest per KOL), kol.kol_score_history (per minute), kol.keyword_metrics.
+# Same image as db-writer, different entry point and consumer group (postgres-metrics-writer).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: metrics-writer
+  labels:
+    app.kubernetes.io/name: metrics-writer
+    app.kubernetes.io/component: writer
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: metrics-writer
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: metrics-writer
+        app.kubernetes.io/component: writer
+    spec:
+      terminationGracePeriodSeconds: 30
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10002
+      containers:
+        - name: metrics-writer
+          image: kol-dbwriter:1.0.0
+          imagePullPolicy: IfNotPresent
+          command: ["python", "metrics_writer.py"]
+          env:
+            - name: BOOTSTRAP_SERVERS
+              value: kafka:9092
+            - name: POSTGRES_APP_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: kol-db-app
+                  key: password
+            - name: DATABASE_URL
+              value: postgresql://kol_app:$(POSTGRES_APP_PASSWORD)@kol-db-rw:5432/kol
+            - name: HISTORY_RETENTION_DAYS
+              value: "7"
+          resources:
+            requests:
+              cpu: 50m
+              memory: 96Mi
+            limits:
+              memory: 384Mi

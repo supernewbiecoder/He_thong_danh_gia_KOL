@@ -1,0 +1,529 @@
+{
+  "uid": "kol-leaderboard",
+  "title": "KOL Leaderboard",
+  "tags": [
+    "kol",
+    "leaderboard",
+    "postgresql"
+  ],
+  "timezone": "browser",
+  "editable": true,
+  "refresh": "10s",
+  "schemaVersion": 39,
+  "version": 1,
+  "time": {
+    "from": "now-6h",
+    "to": "now"
+  },
+  "templating": {
+    "list": []
+  },
+  "annotations": {
+    "list": []
+  },
+  "panels": [
+    {
+      "type": "row",
+      "title": "Tổng quan",
+      "id": 1,
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "panels": []
+    },
+    {
+      "type": "stat",
+      "title": "KOL đang có điểm",
+      "id": 2,
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "kol-postgres"
+      },
+      "description": "",
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 0,
+        "y": 1
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "kol-postgres"
+          },
+          "editorMode": "code",
+          "rawQuery": true,
+          "format": "table",
+          "rawSql": "SELECT count(*) FROM kol.kol_scores"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "blue"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "value",
+        "justifyMode": "center"
+      }
+    },
+    {
+      "type": "stat",
+      "title": "KOL có tương tác trong 15 phút",
+      "id": 3,
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "kol-postgres"
+      },
+      "description": "",
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 6,
+        "y": 1
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "kol-postgres"
+          },
+          "editorMode": "code",
+          "rawQuery": true,
+          "format": "table",
+          "rawSql": "SELECT count(*) FROM kol.kol_scores WHERE window_score > 0"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "blue"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "value",
+        "justifyMode": "center"
+      }
+    },
+    {
+      "type": "stat",
+      "title": "Event lưu trong 1 giờ",
+      "id": 4,
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "kol-postgres"
+      },
+      "description": "",
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 12,
+        "y": 1
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "kol-postgres"
+          },
+          "editorMode": "code",
+          "rawQuery": true,
+          "format": "table",
+          "rawSql": "SELECT count(*) FROM kol.social_events WHERE stored_at > now() - interval '1 hour'"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "blue"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "value",
+        "justifyMode": "center"
+      }
+    },
+    {
+      "type": "stat",
+      "title": "Từ khóa đang nổi",
+      "id": 5,
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "kol-postgres"
+      },
+      "description": "",
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 18,
+        "y": 1
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "kol-postgres"
+          },
+          "editorMode": "code",
+          "rawQuery": true,
+          "format": "table",
+          "rawSql": "SELECT count(*) FROM kol.keyword_metrics WHERE count > 0 AND updated_at > now() - interval '30 minutes'"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "blue"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "value",
+        "justifyMode": "center"
+      }
+    },
+    {
+      "type": "row",
+      "title": "Bảng xếp hạng KOL",
+      "id": 6,
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 5
+      },
+      "panels": []
+    },
+    {
+      "type": "table",
+      "title": "Top KOL toàn thời gian (engagement_score)",
+      "id": 7,
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "kol-postgres"
+      },
+      "description": "Điểm lũy kế do Module 3 tính, Module 4 lưu vào kol.kol_scores.",
+      "gridPos": {
+        "h": 11,
+        "w": 12,
+        "x": 0,
+        "y": 6
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "kol-postgres"
+          },
+          "editorMode": "code",
+          "rawQuery": true,
+          "format": "table",
+          "rawSql": "SELECT coalesce(handle, kol_id) AS \"KOL\",\n       platform AS \"Nền tảng\",\n       followers AS \"Follower\",\n       total_events AS \"Event\",\n       round(engagement_score::numeric, 1) AS \"Điểm lũy kế\",\n       round(window_score::numeric, 1) AS \"Điểm 15 phút\",\n       updated_at AS \"Cập nhật\"\nFROM kol.kol_scores\nORDER BY engagement_score DESC\nLIMIT 20"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm",
+        "footer": {
+          "show": false
+        }
+      }
+    },
+    {
+      "type": "table",
+      "title": "KOL đang nổi (15 phút gần nhất)",
+      "id": 8,
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "kol-postgres"
+      },
+      "description": "",
+      "gridPos": {
+        "h": 11,
+        "w": 12,
+        "x": 12,
+        "y": 6
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "kol-postgres"
+          },
+          "editorMode": "code",
+          "rawQuery": true,
+          "format": "table",
+          "rawSql": "SELECT coalesce(handle, kol_id) AS \"KOL\",\n       platform AS \"Nền tảng\",\n       window_events AS \"Event 15 phút\",\n       round(window_score::numeric, 1) AS \"Điểm 15 phút\",\n       round(velocity_per_min::numeric, 2) AS \"Điểm/phút\",\n       array_to_string(top_hashtags, ', ') AS \"Hashtag\"\nFROM kol.kol_scores\nWHERE window_score > 0 AND updated_at > now() - interval '30 minutes'\nORDER BY window_score DESC\nLIMIT 20"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm",
+        "footer": {
+          "show": false
+        }
+      }
+    },
+    {
+      "type": "row",
+      "title": "Từ khóa và xu hướng",
+      "id": 9,
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 17
+      },
+      "panels": []
+    },
+    {
+      "type": "table",
+      "title": "Từ khóa và hashtag thịnh hành (15 phút)",
+      "id": 10,
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "kol-postgres"
+      },
+      "description": "",
+      "gridPos": {
+        "h": 11,
+        "w": 12,
+        "x": 0,
+        "y": 18
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "kol-postgres"
+          },
+          "editorMode": "code",
+          "rawQuery": true,
+          "format": "table",
+          "rawSql": "SELECT keyword AS \"Từ khóa\",\n       CASE WHEN is_hashtag THEN 'hashtag' ELSE 'từ khóa' END AS \"Loại\",\n       count AS \"Lượt 15 phút\",\n       unique_kols AS \"Số KOL\",\n       coalesce((platforms->>'bluesky')::int, 0) AS \"Bluesky\",\n       coalesce((platforms->>'youtube')::int, 0) AS \"YouTube\"\nFROM kol.keyword_metrics\nWHERE count > 0 AND updated_at > now() - interval '30 minutes'\nORDER BY count DESC\nLIMIT 20"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm",
+        "footer": {
+          "show": false
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Điểm lũy kế của top 5 KOL theo thời gian",
+      "id": 11,
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "kol-postgres"
+      },
+      "gridPos": {
+        "h": 11,
+        "w": 12,
+        "x": 12,
+        "y": 18
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "kol-postgres"
+          },
+          "editorMode": "code",
+          "rawQuery": true,
+          "format": "time_series",
+          "rawSql": "SELECT h.bucket AS \"time\",\n       coalesce(s.handle, h.kol_id) AS metric,\n       h.engagement_score AS value\nFROM kol.kol_score_history h\nJOIN kol.kol_scores s USING (kol_id)\nWHERE h.kol_id IN (SELECT kol_id FROM kol.kol_scores ORDER BY engagement_score DESC LIMIT 5)\n  AND $__timeFilter(h.bucket)\nORDER BY 1"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "lineWidth": 2,
+            "showPoints": "never",
+            "spanNulls": true
+          },
+          "color": {
+            "mode": "palette-classic"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "type": "row",
+      "title": "Dữ liệu đầu vào",
+      "id": 12,
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 29
+      },
+      "panels": []
+    },
+    {
+      "type": "table",
+      "title": "Event lưu trong 1 giờ theo nền tảng và loại",
+      "id": 13,
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "kol-postgres"
+      },
+      "description": "",
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 30
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "kol-postgres"
+          },
+          "editorMode": "code",
+          "rawQuery": true,
+          "format": "table",
+          "rawSql": "SELECT platform AS \"Nền tảng\", event_type AS \"Loại\", count(*) AS \"Số event\"\nFROM kol.social_events\nWHERE stored_at > now() - interval '1 hour'\nGROUP BY 1, 2\nORDER BY 3 DESC"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm",
+        "footer": {
+          "show": false
+        }
+      }
+    }
+  ]
+}

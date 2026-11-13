@@ -1,0 +1,20 @@
+# Read-only access to the KOL database for the "KOL Leaderboard" dashboard.
+# Values come from the Grafana container's environment:
+#   Kubernetes: KOL_DB_HOST=kol-db-ro, KOL_DB_SSLMODE=require, password from Secret kol-db-readonly
+#   Compose:    KOL_DB_HOST=postgres,  KOL_DB_SSLMODE=disable, password from .env.shared
+apiVersion: 1
+
+datasources:
+  - name: KOL PostgreSQL
+    uid: kol-postgres
+    type: grafana-postgresql-datasource
+    access: proxy
+    url: ${KOL_DB_HOST}:5432
+    user: kol_readonly
+    jsonData:
+      database: kol
+      sslmode: ${KOL_DB_SSLMODE}
+      postgresVersion: 1600
+      timescaledb: false
+    secureJsonData:
+      password: ${KOL_DB_PASSWORD}

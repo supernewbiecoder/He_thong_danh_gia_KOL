@@ -57,8 +57,16 @@ spec:
                 VOTERS="${VOTERS:+${VOTERS},}${i}@kafka-${i}.${DOMAIN}:9093"
               done
               export KAFKA_CONTROLLER_QUORUM_VOTERS="${VOTERS}"
-              EXTERNAL_PORT=$((KOL_EXTERNAL_BASE_PORT + KAFKA_NODE_ID))
-              export KAFKA_ADVERTISED_LISTENERS="INTERNAL://${HOSTNAME}.${DOMAIN}:9092,EXTERNAL://${KOL_EXTERNAL_HOST}:${EXTERNAL_PORT}"
+              if [[ -n "${KOL_EXTERNAL_HOST_TEMPLATE:-}" ]]; then
+                # One hostname per broker (Tailscale operator): ORDINAL -> 0, 1, 2
+                EXTERNAL_HOST="${KOL_EXTERNAL_HOST_TEMPLATE//ORDINAL/${KAFKA_NODE_ID}}"
+                EXTERNAL_PORT=9094
+              else
+                # One host, one port per broker (NodePort or kubectl port-forward)
+                EXTERNAL_HOST="${KOL_EXTERNAL_HOST}"
+                EXTERNAL_PORT=$((KOL_EXTERNAL_BASE_PORT + KAFKA_NODE_ID))
+              fi
+              export KAFKA_ADVERTISED_LISTENERS="INTERNAL://${HOSTNAME}.${DOMAIN}:9092,EXTERNAL://${EXTERNAL_HOST}:${EXTERNAL_PORT}"
               echo "node.id=${KAFKA_NODE_ID} voters=${KAFKA_CONTROLLER_QUORUM_VOTERS}"
               exec /usr/local/bin/kol-kafka-entrypoint.sh
           env:
@@ -69,11 +77,16 @@ spec:
             # Must equal spec.replicas (used to build the controller quorum voter list)
             - name: KOL_KAFKA_REPLICAS
               value: "3"
-            # Advertised address for clients outside the cluster (NodePort services in services.yaml)
+            # Advertised address for clients outside the cluster: <host>:30090+ordinal, reached through
+            # the NodePort services (Docker Desktop) or scripts/k8s-expose.sh (minikube).
+            # scripts/k8s-deploy.sh replaces the value with $KOL_EXTERNAL_HOST when it is set.
             - name: KOL_EXTERNAL_HOST
-              value: localhost
+              value: 127.0.0.1
             - name: KOL_EXTERNAL_BASE_PORT
               value: "30090"
+            # Set by scripts/k8s-tailscale.sh: kol-kafka-ORDINAL.<tailnet>.ts.net, port 9094
+            - name: KOL_EXTERNAL_HOST_TEMPLATE
+              value: ""
             - name: CLUSTER_ID
               valueFrom:
                 configMapKeyRef:

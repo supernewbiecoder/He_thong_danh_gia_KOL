@@ -85,3 +85,13 @@ REBALANCES = Counter(
     "Total consumer group partition assignment/revocation events",
     ["event"],
 )
+
+KOLS_EVICTED = Counter(
+    "processor_kols_evicted_total",
+    "KOLs dropped from memory because MAX_ACTIVE_KOLS was reached (least recently active first)",
+)
+
+KOLS_RESTORED = Counter(
+    "processor_kols_restored_total",
+    "KOLs whose cumulative totals were restored from PostgreSQL (kol.kol_scores)",
+)

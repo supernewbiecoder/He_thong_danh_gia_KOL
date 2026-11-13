@@ -28,6 +28,33 @@ class EventValidationError(ValueError):
     """Raised when an incoming social event violates the required contract."""
 
 
+def event_timestamp(event: dict[str, Any], now_ts: float) -> float:
+    """When the collector received the event (ingested_at, else created_at), never later than now.
+
+    The sliding window uses this time, not the processing time, so events replayed from Kafka after
+    a restart do not all land in the "last 15 minutes".
+    """
+    for field_name in ("ingested_at", "created_at"):
+        value = event.get(field_name)
+        if not isinstance(value, str) or not value:
+            continue
+        try:
+            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError:
+            continue
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return min(parsed.timestamp(), now_ts)
+    return now_ts
+
+
+def is_kol_author(event: dict[str, Any]) -> bool:
+    """True when the event was made by the KOL itself (Bluesky author ids carry no platform prefix)."""
+    author_id = str((event.get("author") or {}).get("id") or "")
+    kol_id = str(event.get("kol_id") or "")
+    return bool(author_id) and kol_id in (author_id, f"{event.get('platform')}:{author_id}")
+
+
 def validate_event(event: Any) -> dict[str, Any]:
     """Validate that a parsed JSON payload conforms to social-event.schema.json."""
     if not isinstance(event, dict):
@@ -131,14 +158,17 @@ class KOLRecord:
         hashtags: list[str],
         now_ts: float,
         window_seconds: float,
+        event_ts: float | None = None,
     ) -> None:
         author = event.get("author") or {}
-        # If the author of a post is the KOL themselves, or handle is provided, keep latest metadata
-        if event.get("event_type") == "post" or self.handle is None:
+        # Profile data only comes from the KOL's own events: on a like or a comment the author is
+        # the fan, and their handle must not become the KOL's name.
+        if is_kol_author(event):
             if author.get("handle"):
                 self.handle = str(author["handle"])
             if isinstance(author.get("followers"), int) and author["followers"] >= 0:
                 self.followers = author["followers"]
+        event_ts = now_ts if event_ts is None else event_ts
 
         event_type = str(event.get("event_type", "post"))
         self.total_events += 1
@@ -159,20 +189,22 @@ class KOLRecord:
         for tag in hashtags:
             self.hashtag_counts[tag] += 1
 
-        sample = KOLWindowSample(
-            timestamp=now_ts,
-            likes=likes,
-            shares=shares,
-            comments=comments,
-            views=views,
-            score=event_score,
-        )
-        self.window_samples.append(sample)
-        self.window_likes += likes
-        self.window_shares += shares
-        self.window_comments += comments
-        self.window_views += views
-        self.window_score = round(self.window_score + event_score, 4)
+        # Older events (a replay, a backlog) count toward the totals but not toward "trending now".
+        if event_ts >= now_ts - window_seconds:
+            sample = KOLWindowSample(
+                timestamp=event_ts,
+                likes=likes,
+                shares=shares,
+                comments=comments,
+                views=views,
+                score=event_score,
+            )
+            self.window_samples.append(sample)
+            self.window_likes += likes
+            self.window_shares += shares
+            self.window_comments += comments
+            self.window_views += views
+            self.window_score = round(self.window_score + event_score, 4)
 
         self.last_event_at = str(event.get("created_at") or "")
         self.evict_expired(now_ts, window_seconds)
@@ -253,6 +285,9 @@ class KeywordRecord:
     )
     kol_counts: Counter[str] = field(default_factory=Counter)
     dirty: bool = False
+    # Once published, later updates (including the count decaying to 0) keep being published
+    # even if the keyword falls under the minimum number of KOLs.
+    published: bool = False
 
     def add_occurrence(
         self,
@@ -261,16 +296,19 @@ class KeywordRecord:
         kol_id: str,
         now_ts: float,
         window_seconds: float,
+        event_ts: float | None = None,
     ) -> None:
         if is_hashtag:
             self.is_hashtag = True
         self.total_count += 1
-        self.occurrences.append(KeywordOccurrence(timestamp=now_ts, platform=platform, kol_id=kol_id))
-        if platform in self.platform_counts:
-            self.platform_counts[platform] += 1
-        else:
-            self.platform_counts[platform] = 1
-        self.kol_counts[kol_id] += 1
+        event_ts = now_ts if event_ts is None else event_ts
+        if event_ts >= now_ts - window_seconds:
+            self.occurrences.append(KeywordOccurrence(timestamp=event_ts, platform=platform, kol_id=kol_id))
+            if platform in self.platform_counts:
+                self.platform_counts[platform] += 1
+            else:
+                self.platform_counts[platform] = 1
+            self.kol_counts[kol_id] += 1
         self.evict_expired(now_ts, window_seconds)
         self.dirty = True
 
@@ -321,15 +359,69 @@ class StreamState:
         dedup_cache_size: int = 200_000,
         extract_text_keywords: bool = True,
         weights: ScoringWeights | None = None,
+        max_active_kols: int = 0,
+        min_keyword_kols: int = 1,
     ) -> None:
         self.window_minutes = max(1, window_minutes)
         self.window_seconds = float(self.window_minutes * 60)
         self.extract_text_keywords = extract_text_keywords
         self.weights = weights or ScoringWeights()
+        # 0 = unlimited. The Bluesky firehose covers the whole network, so without a limit every
+        # account ever seen would stay in RAM until the pod is OOM-killed.
+        self.max_active_kols = max(0, max_active_kols)
+        self.min_keyword_kols = max(1, min_keyword_kols)
 
         self.dedup = DedupCache(max_size=dedup_cache_size)
-        self.kols: dict[str, KOLRecord] = {}
+        # Ordered by last activity (oldest first), which is the eviction order.
+        self.kols: OrderedDict[str, KOLRecord] = OrderedDict()
         self.keywords: dict[str, KeywordRecord] = {}
+
+    def seed_kol(self, kol_id: str, saved: dict[str, Any]) -> bool:
+        """Restore a KOL's cumulative totals saved in PostgreSQL (kol.kol_scores).
+
+        Called before the first event of a KOL that is not in RAM: after a restart, a rebalance or
+        an eviction. Returns False when the KOL is already tracked.
+        """
+        if kol_id in self.kols:
+            return False
+        record = KOLRecord(kol_id=kol_id, platform=str(saved.get("platform") or kol_id.split(":", 1)[0]))
+        record.handle = saved.get("handle") or None
+        followers = saved.get("followers")
+        record.followers = followers if isinstance(followers, int) else None
+        record.total_events = int(saved.get("total_events") or 0)
+        breakdown = saved.get("event_breakdown")
+        if isinstance(breakdown, dict):
+            for key, value in breakdown.items():
+                record.event_breakdown[str(key)] = int(value or 0)
+        totals = saved.get("metrics_total") if isinstance(saved.get("metrics_total"), dict) else {}
+        record.total_likes = int(totals.get("likes") or 0)
+        record.total_shares = int(totals.get("shares") or 0)
+        record.total_comments = int(totals.get("comments") or 0)
+        record.total_views = int(totals.get("views") or 0)
+        record.total_score = float(saved.get("engagement_score") or 0.0)
+        # Only the top hashtags are saved, so their counts restart from a small baseline.
+        for tag in saved.get("top_hashtags") or []:
+            record.hashtag_counts[str(tag)] += 1
+        record.last_event_at = saved.get("last_event_at")
+        self.kols[kol_id] = record
+        return True
+
+    def evict_inactive(self) -> int:
+        """Drop the least recently active KOLs that were already published, down to max_active_kols.
+
+        Their totals live on in kol.metrics.kol-scores / PostgreSQL and are restored by seed_kol
+        when the KOL shows up again.
+        """
+        if not self.max_active_kols or len(self.kols) <= self.max_active_kols:
+            return 0
+        evicted = 0
+        for kol_id in list(self.kols):
+            if len(self.kols) <= self.max_active_kols:
+                break
+            if not self.kols[kol_id].dirty:
+                del self.kols[kol_id]
+                evicted += 1
+        return evicted
 
     def process_event(self, raw_event: Any, now_ts: float) -> bool:
         """Validate, deduplicate, and aggregate a single event.
@@ -349,6 +441,7 @@ class StreamState:
         metrics = event.get("metrics") or {}
 
         event_score = self.weights.calculate_event_score(event_type, metrics)
+        event_ts = event_timestamp(event, now_ts)
         extracted = extract_keywords_and_hashtags(
             event, extract_from_text=self.extract_text_keywords
         )
@@ -358,6 +451,8 @@ class StreamState:
         if kol_record is None:
             kol_record = KOLRecord(kol_id=kol_id, platform=platform)
             self.kols[kol_id] = kol_record
+        else:
+            self.kols.move_to_end(kol_id)
 
         kol_record.add_event(
             event=event,
@@ -365,6 +460,7 @@ class StreamState:
             hashtags=hashtags_only,
             now_ts=now_ts,
             window_seconds=self.window_seconds,
+            event_ts=event_ts,
         )
 
         for kw, is_tag in extracted:
@@ -378,6 +474,7 @@ class StreamState:
                 kol_id=kol_id,
                 now_ts=now_ts,
                 window_seconds=self.window_seconds,
+                event_ts=event_ts,
             )
 
         return True
@@ -408,7 +505,11 @@ class StreamState:
                 empty_keys.append(kw)
                 continue
             if record.dirty:
-                dirty_keywords.append(record)
+                # A word used by a single account is noise, not a trend.
+                if record.published or len(record.kol_counts) >= self.min_keyword_kols:
+                    dirty_keywords.append(record)
+                else:
+                    record.dirty = False
 
         for kw in empty_keys:
             del self.keywords[kw]
@@ -423,6 +524,7 @@ class StreamState:
                 (record.keyword, record.to_payload(self.window_minutes, updated_at_iso))
             )
             record.dirty = False
+            record.published = True
 
         # Clear dirty flag on remaining low-rank keywords so they don't accumulate forever
         for record in dirty_keywords[max(1, top_keywords_limit) :]:

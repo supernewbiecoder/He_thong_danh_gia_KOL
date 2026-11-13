@@ -214,6 +214,37 @@ class YouTubeCollector(Collector):
     # contentDetails/topicDetails/liveStreamingDetails cost no extra quota: videos.list charges
     # one unit per call no matter how many parts are requested.
     video_parts = "snippet,statistics,contentDetails,topicDetails,liveStreamingDetails"
+    # Units charged per call (YouTube Data API quota table). The daily free quota is 10,000 units,
+    # so search (100) is the call to avoid: channels are followed through their uploads playlist.
+    QUOTA_COST = {"search": 100, "videos": 1, "channels": 1, "playlistItems": 1,
+                  "commentThreads": 1, "comments": 1}
+
+    def __init__(self, publisher: KafkaPublisher) -> None:
+        super().__init__(publisher)
+        # Channels followed every cycle: the configured ones plus those found by keyword search.
+        self.watch: OrderedDict[str, None] = OrderedDict()
+        self.pinned: set[str] = set()
+        self.uploads: dict[str, str] = {}
+        self.last_search = 0.0
+        self.quota_used = 0
+
+    def api_get(self, endpoint: str, params: dict[str, Any]) -> dict[str, Any]:
+        self.quota_used += self.QUOTA_COST.get(endpoint, 1)
+        return self.request("GET", f"{self.api}/{endpoint}", params=params)
+
+    def watch_channel(self, channel_id: str, pinned: bool = False) -> None:
+        if not channel_id:
+            return
+        if pinned:
+            self.pinned.add(channel_id)
+        self.watch[channel_id] = None
+        self.watch.move_to_end(channel_id)
+        limit = max(1, int(os.getenv("YOUTUBE_MAX_CHANNELS", "25")))
+        for candidate in list(self.watch):
+            if len(self.watch) <= limit:
+                break
+            if candidate not in self.pinned:
+                del self.watch[candidate]
 
     @staticmethod
     def duration_seconds(value: str | None) -> int:
@@ -238,11 +269,11 @@ class YouTubeCollector(Collector):
         return names
 
     def search_pages(self) -> int:
-        raw = os.getenv("YOUTUBE_SEARCH_MAX_PAGES") or os.getenv("YOUTUBE_MAX_PAGES", "5")
+        raw = os.getenv("YOUTUBE_SEARCH_MAX_PAGES") or os.getenv("YOUTUBE_MAX_PAGES", "1")
         return max(1, int(raw))
 
     def comment_pages(self) -> int:
-        raw = os.getenv("YOUTUBE_COMMENT_MAX_PAGES") or os.getenv("YOUTUBE_MAX_PAGES", "5")
+        raw = os.getenv("YOUTUBE_COMMENT_MAX_PAGES") or os.getenv("YOUTUBE_MAX_PAGES", "1")
         return max(1, int(raw))
 
     def channel_stats(self, api_key: str, channel_ids: set[str]) -> dict[str, dict[str, Any]]:
@@ -252,7 +283,7 @@ class YouTubeCollector(Collector):
         for start in range(0, len(ids), 50):
             chunk = ids[start:start + 50]
             try:
-                data = self.request("GET", f"{self.api}/channels", params={
+                data = self.api_get("channels", {
                     "key": api_key, "part": "snippet,statistics", "id": ",".join(chunk),
                 })
             except requests.RequestException as exc:
@@ -279,41 +310,27 @@ class YouTubeCollector(Collector):
             LOG.warning("YouTube disabled: set YOUTUBE_API_KEY and YOUTUBE_CHANNEL_IDS or YOUTUBE_SEARCH_QUERIES")
             return
 
-        searches = [{"channelId": channel_id} for channel_id in channels]
-        searches.extend({"q": query} for query in queries)
-        discovered: dict[str, dict[str, Any]] = {}
-        seen_video_ids: set[str] = set()
+        self.quota_used = 0
+        for channel_id in channels:
+            self.watch_channel(channel_id, pinned=True)
 
-        for search_params in searches:
-            page_token = None
-            for _ in range(self.search_pages()):
-                params = {"key": api_key, "part": "snippet", "order": "date",
-                          "maxResults": 50, "type": "video", **search_params}
-                if page_token:
-                    params["pageToken"] = page_token
-                try:
-                    page = self.request("GET", f"{self.api}/search", params=params)
-                except requests.RequestException as exc:
-                    # One failing query (quota, deleted channel) must not abort the other queries.
-                    LOG.error("YouTube search failed for %s: %s", search_params, exc)
-                    break
-                ids = [item["id"]["videoId"] for item in page.get("items", [])
-                       if item.get("id", {}).get("videoId")
-                       and item["id"]["videoId"] not in seen_video_ids]
-                seen_video_ids.update(ids)
-                if ids:
-                    try:
-                        details = self.request("GET", f"{self.api}/videos", params={
-                            "key": api_key, "part": self.video_parts, "id": ",".join(ids),
-                        })
-                    except requests.RequestException as exc:
-                        LOG.error("YouTube videos lookup failed: %s", exc)
-                        details = {}
-                    for item in details.get("items", []):
-                        discovered[item["id"]] = item
-                page_token = page.get("nextPageToken")
-                if not page_token:
-                    break
+        video_ids: list[str] = []
+        if queries and self.search_due():
+            video_ids.extend(self.search_videos(api_key, queries))
+        video_ids.extend(self.watched_uploads(api_key))
+
+        discovered: dict[str, dict[str, Any]] = {}
+        unique_ids = list(dict.fromkeys(video_ids))
+        for start in range(0, len(unique_ids), 50):
+            try:
+                details = self.api_get("videos", {
+                    "key": api_key, "part": self.video_parts, "id": ",".join(unique_ids[start:start + 50]),
+                })
+            except requests.RequestException as exc:
+                LOG.error("YouTube videos lookup failed: %s", exc)
+                continue
+            for item in details.get("items", []):
+                discovered[item["id"]] = item
 
         # Channel statistics are fetched once per cycle, after all queries are done.
         channel_ids = {item.get("snippet", {}).get("channelId", "") for item in discovered.values()}
@@ -325,6 +342,73 @@ class YouTubeCollector(Collector):
             yield self.video_event(item, channel_id, stats.get(channel_id))
             if include_comments:
                 yield from self.comment_events(api_key, item, channel_id)
+        LOG.info("YouTube cycle: %d video(s) from %d watched channel(s), ~%d quota unit(s) used",
+                 len(discovered), len(self.watch), self.quota_used)
+
+    def search_due(self) -> bool:
+        """Keyword search costs 100 units per page, so it runs at most once per interval."""
+        interval = int(os.getenv("YOUTUBE_SEARCH_INTERVAL_SECONDS", "86400"))
+        return self.last_search == 0.0 or time.monotonic() - self.last_search >= interval
+
+    def search_videos(self, api_key: str, queries: list[str]) -> list[str]:
+        """Discover videos by keyword; their channels join the watchlist for the next cycles."""
+        self.last_search = time.monotonic()
+        video_ids: list[str] = []
+        for query in queries:
+            page_token = None
+            for _ in range(self.search_pages()):
+                params = {"key": api_key, "part": "snippet", "q": query, "type": "video",
+                          "maxResults": 50, "order": os.getenv("YOUTUBE_SEARCH_ORDER", "relevance")}
+                if page_token:
+                    params["pageToken"] = page_token
+                try:
+                    page = self.api_get("search", params)
+                except requests.RequestException as exc:
+                    # One failing query (quota, bad parameter) must not abort the other queries.
+                    LOG.error("YouTube search failed for %r: %s", query, exc)
+                    break
+                for item in page.get("items", []):
+                    video_id = item.get("id", {}).get("videoId")
+                    if video_id:
+                        video_ids.append(video_id)
+                    self.watch_channel(item.get("snippet", {}).get("channelId", ""))
+                page_token = page.get("nextPageToken")
+                if not page_token:
+                    break
+        return video_ids
+
+    def watched_uploads(self, api_key: str) -> list[str]:
+        """Newest uploads of every watched channel: 1 unit per channel instead of 100 per search."""
+        missing = [cid for cid in self.watch if cid not in self.uploads]
+        for start in range(0, len(missing), 50):
+            try:
+                data = self.api_get("channels", {
+                    "key": api_key, "part": "contentDetails", "id": ",".join(missing[start:start + 50]),
+                })
+            except requests.RequestException as exc:
+                LOG.warning("could not resolve uploads playlists: %s", exc)
+                continue
+            for item in data.get("items", []):
+                playlist = item.get("contentDetails", {}).get("relatedPlaylists", {}).get("uploads")
+                if playlist:
+                    self.uploads[item["id"]] = playlist
+
+        recent = max(1, min(50, int(os.getenv("YOUTUBE_RECENT_VIDEOS", "5"))))
+        video_ids: list[str] = []
+        for channel_id in self.watch:
+            playlist = self.uploads.get(channel_id)
+            if not playlist:
+                continue
+            try:
+                page = self.api_get("playlistItems", {
+                    "key": api_key, "part": "contentDetails", "playlistId": playlist, "maxResults": recent,
+                })
+            except requests.RequestException as exc:
+                LOG.warning("uploads of channel %s unavailable: %s", channel_id, exc)
+                continue
+            video_ids.extend(item["contentDetails"]["videoId"] for item in page.get("items", [])
+                             if item.get("contentDetails", {}).get("videoId"))
+        return video_ids
 
     def video_event(self, item: dict[str, Any], channel_id: str,
                     channel: dict[str, Any] | None) -> dict[str, Any]:
@@ -377,7 +461,7 @@ class YouTubeCollector(Collector):
             if page_token:
                 params["pageToken"] = page_token
             try:
-                page = self.request("GET", f"{self.api}/commentThreads", params=params)
+                page = self.api_get("commentThreads", params)
             except requests.RequestException as exc:
                 # Comments disabled on the video, or quota: the video event is already yielded.
                 LOG.warning("comments unavailable for video %s: %s", video["id"], exc)
@@ -401,7 +485,7 @@ class YouTubeCollector(Collector):
             if page_token:
                 params["pageToken"] = page_token
             try:
-                page = self.request("GET", f"{self.api}/comments", params=params)
+                page = self.api_get("comments", params)
             except requests.RequestException as exc:
                 LOG.warning("replies unavailable for comment %s: %s", parent_comment_id, exc)
                 return
@@ -443,7 +527,7 @@ class BlueskyCollector(Collector):
         cached = self.post_cache.get(subject_uri)
         if cached:
             return cached
-        if os.getenv("BLUESKY_ENRICH_INTERACTIONS", "true").lower() != "true":
+        if os.getenv("BLUESKY_ENRICH_INTERACTIONS", "false").lower() != "true":
             return {}
         try:
             data = self.request("GET", f"{self.api}/app.bsky.feed.getPosts",
@@ -502,9 +586,15 @@ class BlueskyCollector(Collector):
             author["followers"] = info["followers"]
 
     def publish_batch(self, events: list[dict[str, Any]]) -> None:
-        """Enrich the whole batch before publishing, so ordering and the P0 cursor logic hold."""
+        """Enrich the whole batch before publishing, so ordering and the P0 cursor logic hold.
+
+        Only the KOL's own events (posts, deletes) are looked up: on a like or a follow the author
+        is a fan, whose profile Module 3 never uses. Looking up every fan made the firehose an
+        HTTP-bound loop of a few events per second.
+        """
         missing = {event["author"]["id"] for event in events
-                   if event["author"].get("id") and not event["author"].get("handle")}
+                   if event["author"].get("id") and not event["author"].get("handle")
+                   and event["kol_id"] == f"bluesky:{event['author']['id']}"}
         if missing:
             self.resolve_authors(missing)
         for event in events:
@@ -611,6 +701,13 @@ class BlueskyCollector(Collector):
         "app.bsky.graph.follow",
     }
 
+    @staticmethod
+    def did_of(uri: str | None) -> str | None:
+        """DID of the repository that owns an at:// URI (at://<did>/<collection>/<rkey>)."""
+        if isinstance(uri, str) and uri.startswith("at://did:"):
+            return uri[len("at://"):].split("/", 1)[0]
+        return None
+
     def normalize_firehose_event(self, payload: dict[str, Any]) -> dict[str, Any] | None:
         if payload.get("kind") != "commit":
             return None
@@ -674,6 +771,15 @@ class BlueskyCollector(Collector):
             if isinstance(subject, str):
                 parent_id = subject
 
+        # Engagement is scored for the account that RECEIVES it: a like, repost or reply belongs to
+        # the author of the post it targets, a follow to the followed account. author.id stays the
+        # actor, so who did what is still recorded.
+        kol_did = did
+        if event_type in {"like", "repost", "reply"}:
+            kol_did = self.did_of(parent_id) or did
+        elif event_type == "follow" and isinstance(parent_id, str) and parent_id.startswith("did:"):
+            kol_did = parent_id
+
         created_at = record.get("createdAt")
         if not created_at and payload.get("time_us"):
             created_at = datetime.fromtimestamp(
@@ -684,7 +790,7 @@ class BlueskyCollector(Collector):
             event_type=event_type,
             content_id=content_id,
             parent_id=parent_id,
-            kol_id=f"bluesky:{did}",
+            kol_id=f"bluesky:{kol_did}",
             author_id=did,
             text=text,
             created_at=created_at,
@@ -839,6 +945,11 @@ class BlueskyCollector(Collector):
                 yield event
 
 
+# Collectors live across polling cycles: the YouTube watchlist and the time of the last keyword
+# search must survive from one cycle to the next.
+_INSTANCES: dict[str, Collector] = {}
+
+
 def run_once(publisher: KafkaPublisher, requested: set[str] | None = None) -> None:
     if requested is None:
         requested = {name.lower() for name in split_env("COLLECTORS") or ["youtube", "bluesky"]}
@@ -848,8 +959,11 @@ def run_once(publisher: KafkaPublisher, requested: set[str] | None = None) -> No
         if not collector:
             LOG.warning("Unknown collector: %s", name)
             continue
+        instance = _INSTANCES.get(name)
+        if instance is None or instance.publisher is not publisher:
+            instance = _INSTANCES[name] = collector(publisher)
         try:
-            collector(publisher).run()
+            instance.run()
         except requests.RequestException as exc:
             LOG.error("%s request failed: %s", name, exc)
         except (KeyError, ValueError, TypeError) as exc:

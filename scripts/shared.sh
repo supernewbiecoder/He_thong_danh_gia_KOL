@@ -115,14 +115,15 @@ case "${1:-}" in
     mkdir -p backups
     dc up -d --build --wait --wait-timeout 300 \
       kafka-1 kafka-2 kafka-3 kafka-ui kafka-exporter prometheus grafana postgres postgres-backup \
-      db-writer social-collectors
+      db-writer metrics-writer social-collectors stream-processor
     dc run --rm kafka-init
     use_tailscale && publish
     show_info
     ;;
   down)
     use_tailscale && unpublish
-    dc down
+    # The profiles make sure collectors and Module 3 (profiled services) are stopped as well.
+    dc --profile collectors --profile processor down
     log "Stopped. Data is kept in the Docker volumes."
     ;;
   status)

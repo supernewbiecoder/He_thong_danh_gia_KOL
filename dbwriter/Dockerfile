@@ -8,7 +8,7 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY main.py schema.sql ./
+COPY main.py metrics_writer.py schema.sql ./
 
 RUN useradd --system --uid 10002 dbwriter
 USER dbwriter

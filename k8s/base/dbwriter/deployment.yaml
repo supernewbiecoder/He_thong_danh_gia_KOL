@@ -36,13 +36,14 @@ spec:
               value: kafka:9092
             # Secret first, then DATABASE_URL built from it. Kubernetes expands $(VAR) inside
             # env values, so the password never appears in a manifest or in git.
+            # kol-db-rw always points at the current primary, also right after a failover.
             - name: POSTGRES_APP_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: postgres-credentials
-                  key: app-password
+                  name: kol-db-app
+                  key: password
             - name: DATABASE_URL
-              value: postgresql://kol_app:$(POSTGRES_APP_PASSWORD)@postgres:5432/kol
+              value: postgresql://kol_app:$(POSTGRES_APP_PASSWORD)@kol-db-rw:5432/kol
           resources:
             requests:
               cpu: 100m

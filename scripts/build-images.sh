@@ -1,30 +1,46 @@
 #!/usr/bin/env bash
-# Builds the project images and (optionally) loads them into a local Kubernetes cluster.
-#   ./scripts/build-images.sh            # Docker Desktop Kubernetes: local images are visible directly
-#   ./scripts/build-images.sh kind       # + kind load docker-image
-#   ./scripts/build-images.sh minikube   # + minikube image load
+# Builds the project images where the Kubernetes cluster can use them.
+#   ./scripts/build-images.sh minikube   # build INSIDE minikube (minikube image build): no Docker needed
+#   ./scripts/build-images.sh            # docker build (Docker Desktop Kubernetes shares Docker's images)
+#   ./scripts/build-images.sh kind       # docker build + kind load docker-image
+#
+# MINIKUBE_PROFILE=<name> selects a minikube profile (default: minikube).
 set -euo pipefail
 source "$(dirname "$0")/lib.sh"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+# Windows: minikube.exe / docker.exe do not understand Git Bash paths such as /c/Users/...
+command -v cygpath >/dev/null 2>&1 && ROOT="$(cygpath -m "$ROOT")"
 
 KAFKA_VERSION="${KAFKA_VERSION:-3.9.0}"
-IMAGES=("kol-kafka:${KAFKA_VERSION}" "kol-loadgen:1.0.0" "kol-collectors:1.0.0" "kol-dbwriter:1.0.0" "kol-stream-processor:1.0.0")
+MINIKUBE="${MINIKUBE:-minikube}"
+MINIKUBE_PROFILE="${MINIKUBE_PROFILE:-minikube}"
 
-step "Building images"
-docker build --build-arg KAFKA_VERSION="$KAFKA_VERSION" -t "kol-kafka:${KAFKA_VERSION}" "$ROOT/docker/kafka"
-docker build -t kol-loadgen:1.0.0 "$ROOT/loadtest"
-docker build -t kol-collectors:1.0.0 "$ROOT/collectors"
-docker build -t kol-dbwriter:1.0.0 "$ROOT/dbwriter"
-docker build -t kol-stream-processor:1.0.0 "$ROOT/processor"
+# tag | build context (Dockerfiles are plain OCI build files: minikube, BuildKit or Docker can build them)
+IMAGES=(
+  "kol-kafka:${KAFKA_VERSION}|docker/kafka"
+  "kol-collectors:1.0.0|collectors"
+  "kol-stream-processor:1.0.0|processor"
+  "kol-dbwriter:1.0.0|dbwriter"
+  "kol-loadgen:1.0.0|loadtest"
+)
 
-case "${1:-}" in
-  kind)
-    step "Loading into kind"
-    for img in "${IMAGES[@]}"; do kind load docker-image "$img"; done ;;
-  minikube)
-    step "Loading into minikube"
-    for img in "${IMAGES[@]}"; do minikube image load "$img"; done ;;
-  "") ;;
-  *) echo "Unknown target: $1 (kind|minikube)"; exit 1 ;;
+TARGET="${1:-docker}"
+case "$TARGET" in
+  minikube|docker|kind) ;;
+  *) echo "Unknown target: $TARGET (minikube|docker|kind)"; exit 1 ;;
 esac
-log "Images ready: ${IMAGES[*]}"
+
+step "Building ${#IMAGES[@]} images for: $TARGET"
+for entry in "${IMAGES[@]}"; do
+  tag="${entry%%|*}"
+  context="$ROOT/${entry#*|}"
+  log "$tag  <-  ${entry#*|}/"
+  if [[ "$TARGET" == minikube ]]; then
+    "$MINIKUBE" -p "$MINIKUBE_PROFILE" image build -t "$tag" "$context"
+  else
+    docker build -t "$tag" "$context"
+    [[ "$TARGET" == kind ]] && kind load docker-image "$tag"
+  fi
+done
+
+log "Images ready: $(printf '%s ' "${IMAGES[@]%%|*}")"

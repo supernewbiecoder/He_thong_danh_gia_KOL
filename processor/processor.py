@@ -35,11 +35,14 @@ from processor.metrics import (
     EVENTS_CONSUMED,
     EVENTS_DEDUPLICATED,
     KEYWORDS_PUBLISHED,
+    KOLS_EVICTED,
+    KOLS_RESTORED,
     PROCESSING_LATENCY,
     REBALANCES,
     SCORES_PUBLISHED,
 )
 from processor.state import EventValidationError, StreamState
+from processor.store import ScoreStore
 
 stop_event = threading.Event()
 
@@ -151,6 +154,12 @@ def flush_and_commit(
             if "_NO_OFFSET" not in str(exc):
                 print(f"[processor] offset commit warning: {exc}", file=sys.stderr)
 
+    # Only records published above can be evicted: their totals are already on their way to
+    # PostgreSQL, where seed_kol finds them again.
+    evicted = state.evict_inactive()
+    if evicted:
+        KOLS_EVICTED.inc(evicted)
+
     ACTIVE_KOLS.set(len(state.kols))
     ACTIVE_KEYWORDS.set(len(state.keywords))
     DEDUP_CACHE_ENTRIES.set(len(state.dedup))
@@ -165,7 +174,10 @@ def run_processor(config: ProcessorConfig) -> None:
         dedup_cache_size=config.dedup_cache_size,
         extract_text_keywords=config.extract_text_keywords,
         weights=config.weights,
+        max_active_kols=config.max_active_kols,
+        min_keyword_kols=config.min_keyword_kols,
     )
+    store = ScoreStore(config.database_url) if config.database_url else None
     producer = build_producer(config, instance_id)
     consumer = build_consumer(config, instance_id)
 
@@ -211,6 +223,7 @@ def run_processor(config: ProcessorConfig) -> None:
             )
 
             now_wall = time.time()
+            decoded: list[tuple[Any, bytes | None, Any, float]] = []
             for msg in msgs:
                 if msg.error():
                     if msg.error().code() != KafkaError._PARTITION_EOF:
@@ -238,7 +251,20 @@ def run_processor(config: ProcessorConfig) -> None:
                         error_detail=str(exc),
                     )
                     continue
+                decoded.append((msg, raw_bytes, payload, t0))
 
+            # One query per batch restores the totals of every KOL that is not in RAM yet.
+            if store is not None:
+                unknown = sorted({
+                    payload["kol_id"] for _, _, payload, _ in decoded
+                    if isinstance(payload, dict) and isinstance(payload.get("kol_id"), str)
+                    and payload["kol_id"] not in state.kols
+                })
+                for kol_id, saved in store.load(unknown).items():
+                    if state.seed_kol(kol_id, saved):
+                        KOLS_RESTORED.inc()
+
+            for msg, raw_bytes, payload, t0 in decoded:
                 try:
                     is_new = state.process_event(payload, now_ts=now_wall)
                 except EventValidationError as exc:
@@ -300,6 +326,8 @@ def run_processor(config: ProcessorConfig) -> None:
         finally:
             producer.flush(15.0)
             consumer.close()
+            if store is not None:
+                store.close()
         print("[processor] stopped cleanly.")
 
 

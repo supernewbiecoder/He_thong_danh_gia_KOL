@@ -70,6 +70,16 @@ JSON UTF-8, theo [`config/schemas/social-event.schema.json`](../config/schemas/s
 
 **Key của message = `kol_id`** (bytes UTF-8). Nhờ vậy mọi event của cùng một KOL vào cùng partition và giữ thứ tự, nên consumer có thể giữ state của KOL đó trong RAM.
 
+**`kol_id` là tài khoản *nhận* tương tác, `author` là tài khoản *thực hiện*:**
+
+| Event | `kol_id` | `author.id` |
+|---|---|---|
+| post | người đăng | người đăng |
+| reply, comment | chủ bài gốc (YouTube: kênh) | người bình luận |
+| like, repost (Bluesky) | chủ bài được like/repost (lấy từ `subject.uri`) | người like/repost |
+| follow (Bluesky) | người được follow | người follow |
+| delete | người xóa | người xóa |
+
 ## 4. Producer (Module 2, Module 3 khi ghi kết quả)
 
 Python với [`confluent-kafka`](https://pypi.org/project/confluent-kafka/) (`pip install confluent-kafka`):

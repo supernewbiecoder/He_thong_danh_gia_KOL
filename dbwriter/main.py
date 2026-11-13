@@ -182,6 +182,11 @@ class Store:
 
     def save(self, events: list[dict[str, Any]]) -> None:
         """Insert a batch, blocking until it is committed. Offsets are only committed afterwards."""
+        self.save_rows([(INSERT_SQL, [to_row(event) for event in events])])
+
+    def save_rows(self, statements: list[tuple[str, list[tuple[Any, ...]]]]) -> None:
+        """Run every (sql, rows) pair in ONE transaction, retrying until PostgreSQL accepts it."""
+        count = sum(len(rows) for _, rows in statements)
         while not STOP:
             try:
                 if self.conn is None or self.conn.closed:
@@ -190,10 +195,12 @@ class Store:
                         return
                 with self.conn.transaction():
                     with self.conn.cursor() as cursor:
-                        cursor.executemany(INSERT_SQL, [to_row(event) for event in events])
+                        for sql, rows in statements:
+                            if rows:
+                                cursor.executemany(sql, rows)
                 return
             except psycopg.Error as exc:
-                LOG.error("write of %d event(s) failed (%s), reconnecting", len(events), exc)
+                LOG.error("write of %d row(s) failed (%s), reconnecting", count, exc)
                 if self.conn is not None:
                     try:
                         self.conn.close()

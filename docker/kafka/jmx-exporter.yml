@@ -16,12 +16,18 @@
 # JVM / process metrics (jvm_*, process_*) are exported automatically by the agent.
 lowercaseOutputName: true
 
+# Only the MBeans used by the Grafana dashboard and the alert rules. "kafka.server:*" also walks
+# every per-client and per-partition bean: on a busy broker one scrape then took more than 5s of
+# CPU, scrapes piled up and the exporter threads used a whole core per broker.
 includeObjectNames:
-  - "kafka.server:*"
-  - "kafka.controller:*"
-  - "kafka.network:*"
-  - "kafka.log:type=Log,*"
-  - "kafka.coordinator.group:*"
+  - "kafka.server:type=BrokerTopicMetrics,*"
+  - "kafka.server:type=ReplicaManager,*"
+  - "kafka.server:type=KafkaRequestHandlerPool,*"
+  - "kafka.controller:type=KafkaController,*"
+  - "kafka.network:type=RequestMetrics,name=TotalTimeMs,request=Produce"
+  - "kafka.network:type=RequestMetrics,name=TotalTimeMs,request=FetchConsumer"
+  - "kafka.network:type=SocketServer,*"
+  - "kafka.log:type=Log,name=Size,*"
 
 rules:
   # Request handler pool idle ratio is a meter; the useful value is the rate (0..1).

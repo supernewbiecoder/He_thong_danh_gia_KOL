@@ -5,7 +5,9 @@
 #   prometheus.io/job:    "<job name>"      (optional, defaults to the pod's app.kubernetes.io/name)
 # Job names match monitoring/prometheus/prometheus.yml (Compose) so the same dashboard/alerts work.
 global:
-  scrape_interval: 5s
+  # 10s: a scrape of a busy broker must finish well inside the interval
+  scrape_interval: 10s
+  scrape_timeout: 8s
   evaluation_interval: 15s
   external_labels:
     cluster: kol-k8s

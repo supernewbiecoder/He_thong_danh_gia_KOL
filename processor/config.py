@@ -74,6 +74,9 @@ class ProcessorConfig:
     metrics_port: int
     extract_text_keywords: bool
     weights: ScoringWeights
+    max_active_kols: int
+    min_keyword_kols: int
+    database_url: str
 
 
 def parse_config(argv: list[str] | None = None) -> ProcessorConfig:
@@ -164,6 +167,23 @@ def parse_config(argv: list[str] | None = None) -> ProcessorConfig:
         default=env("EXTRACT_TEXT_KEYWORDS", "true").lower() in ("0", "false", "no"),
         help="Only count explicit hashtags, skip tokenizing event text",
     )
+    p.add_argument(
+        "--max-active-kols",
+        type=int,
+        default=int(env("MAX_ACTIVE_KOLS", "50000")),
+        help="KOLs kept in RAM; the least recently active are evicted, 0 = unlimited [MAX_ACTIVE_KOLS]",
+    )
+    p.add_argument(
+        "--min-keyword-kols",
+        type=int,
+        default=int(env("MIN_KEYWORD_KOLS", "2")),
+        help="Distinct KOLs needed in the window before a keyword is published [MIN_KEYWORD_KOLS]",
+    )
+    p.add_argument(
+        "--database-url",
+        default=env("DATABASE_URL", ""),
+        help="PostgreSQL URL to restore KOL totals from kol.kol_scores, empty = off [DATABASE_URL]",
+    )
 
     args = p.parse_args(argv)
     topics = [t.strip() for t in args.input_topics.split(",") if t.strip()]
@@ -199,4 +219,7 @@ def parse_config(argv: list[str] | None = None) -> ProcessorConfig:
         metrics_port=args.metrics_port,
         extract_text_keywords=not args.no_text_keywords,
         weights=weights,
+        max_active_kols=max(0, args.max_active_kols),
+        min_keyword_kols=max(1, args.min_keyword_kols),
+        database_url=args.database_url,
     )

@@ -1,7 +1,8 @@
 # Prometheus config for Docker Compose. Kubernetes uses k8s/base/monitoring/prometheus.yml
 # (same job names, so the Grafana dashboard and alert rules work in both environments).
 global:
-  scrape_interval: 5s        # short interval: we want to see load spikes during tests
+  scrape_interval: 10s       # short enough to see load spikes, long enough for a busy broker
+  scrape_timeout: 8s
   evaluation_interval: 15s
   external_labels:
     cluster: kol-compose

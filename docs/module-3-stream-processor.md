@@ -195,6 +195,16 @@ Trong đó điểm gốc theo loại sự kiện ($w_{\text{event}}$):
 
 ---
 
+### 4.6. Cập nhật 13/11/2026
+
+- **Profile KOL chỉ lấy từ event của chính KOL:** `handle` và `followers` chỉ cập nhật khi `author.id` trùng với KOL. Trước đây event đầu tiên của một KOL có thể là bình luận của fan, nên tên fan bị gán cho KOL.
+- **Cửa sổ 15 phút theo thời điểm thu thập (`ingested_at`):** event cũ (đọc lại sau khi khởi động lại, hoặc tồn đọng) vẫn cộng vào điểm lũy kế nhưng không cộng vào `window_score`.
+- **Giới hạn RAM (`MAX_ACTIVE_KOLS`, mặc định 50.000):** firehose Bluesky thấy hàng triệu tài khoản. Khi vượt giới hạn, KOL lâu không hoạt động nhất (đã được publish) bị xóa khỏi RAM.
+- **Khôi phục trạng thái từ PostgreSQL (`DATABASE_URL`):** gặp KOL chưa có trong RAM (sau restart, rebalance hoặc bị xóa) thì đọc điểm lũy kế từ `kol.kol_scores`, mỗi batch một truy vấn. PostgreSQL tạm mất kết nối thì processor vẫn chạy, chỉ không khôi phục (thử lại sau 30 giây).
+- **Từ khóa tiếng Việt theo cụm hai âm tiết:** văn bản tiếng Việt (`lang = vi` hoặc có dấu tiếng Việt) được tách thành cụm như "sản phẩm", "làn da" thay vì từng âm tiết; từ tiếng Anh từ 4 chữ cái trở lên (iphone, review) vẫn giữ nguyên.
+- **Từ khóa cần ít nhất `MIN_KEYWORD_KOLS` KOL (mặc định 2)** trong cửa sổ mới được publish, để loại từ của một tài khoản spam.
+- **Kết quả đã được lưu vào PostgreSQL** bởi `dbwriter/metrics_writer.py` (bảng `kol.kol_scores`, `kol.keyword_metrics`, `kol.kol_score_history`), và Grafana có dashboard "KOL Leaderboard" đọc từ đó.
+
 ## 5. Giám sát (Prometheus Metrics)
 
 Mỗi container `stream-processor` mở cổng `:8000/metrics` và được Prometheus tự động thu thập qua DNS discovery (`monitoring/prometheus/prometheus.yml`) hoặc Pod annotation trên Kubernetes (`k8s/apps/stream-processor.yaml`):

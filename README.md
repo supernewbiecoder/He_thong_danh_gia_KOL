@@ -2,7 +2,15 @@
 
 Hệ thống phân tán thu thập bài đăng/bình luận từ **Bluesky Firehose, YouTube Data API v3**, đệm qua **Kafka cluster**, xử lý luồng in-memory để tính điểm tương tác KOL và từ khóa/hashtag thịnh hành, lưu kết quả vào DB có replication và hiển thị trên dashboard gần thời gian thực.
 
-Repo này hiện chứa **Module 1 – Hạ tầng phân tán**: Kafka cluster, môi trường container (Docker Compose) và Kubernetes, giám sát và kiểm thử chịu tải. Các module khác kết nối vào hạ tầng này theo [docs/integration-guide.md](docs/integration-guide.md).
+Hệ thống **chạy trên Kubernetes** (minikube, không cần Docker). Repo gồm:
+- **Module 1:** Kafka cluster, Kubernetes, giám sát và kiểm thử chịu tải.
+- **Module 2:** thu thập Bluesky và YouTube.
+- **Module 3:** tính điểm KOL và từ khóa thịnh hành.
+- **Module 4:** PostgreSQL có replication và tự failover, lưu dữ liệu gốc và kết quả.
+
+Module 5 (API và dashboard) chưa có; trong lúc chờ, Grafana có dashboard **KOL Leaderboard**.
+
+**Cách cài đặt và chạy từng bước: [HDSD.md](HDSD.md).** Tình trạng các module: [Da_lam_va_con_thieu.md](Da_lam_va_con_thieu.md).
 
 ```mermaid
 flowchart LR
@@ -55,7 +63,18 @@ flowchart LR
 - Kubernetes (tùy chọn): Docker Desktop Kubernetes / minikube / kind, `kubectl` ≥ 1.27.
 - Windows: chạy các script `.sh` bằng **Git Bash**.
 
-## Chạy nhanh (Docker Compose)
+## Chạy trên Kubernetes (cách chính)
+
+```bash
+minikube start --driver=hyperv --container-runtime=containerd --cpus=6 --memory=10g   # Windows Pro
+./scripts/build-images.sh minikube   # build 5 image bên trong minikube, không cần Docker
+./scripts/k8s-deploy.sh              # Kafka, PostgreSQL (CloudNativePG), Module 2-4, giám sát
+./scripts/k8s-expose.sh              # để mở: Kafka 127.0.0.1:30090-30092, Grafana :3000, Kafka UI :8080
+```
+
+Chi tiết: [docs/kubernetes.md](docs/kubernetes.md).
+
+## Chạy nhanh bằng Docker Compose (tùy chọn, để thử trên một máy)
 
 ```bash
 cp .env.example .env              # tùy chọn, mọi biến đều có giá trị mặc định
@@ -156,14 +175,15 @@ RECORDS=2000000 RECORD_SIZE=512 ACKS=1 ./scripts/perf-test.sh
 
 Kịch bản test, cách đọc dashboard và mẫu báo cáo kết quả: [docs/monitoring-and-load-testing.md](docs/monitoring-and-load-testing.md).
 
-## Kubernetes
+## Kiểm thử chịu lỗi trên Kubernetes
 
-```bash
-./scripts/build-images.sh            # thêm "kind" hoặc "minikube" nếu dùng các cluster đó
-./scripts/k8s-deploy.sh              # namespace kol-system: Kafka x3, topics job, UI, Prometheus, Grafana
-kubectl apply -k k8s/apps            # load generator + HPA cho consumer
-kubectl -n kol-system port-forward svc/grafana 3000:3000
-```
+Đo ngày 13/11/2026 trên minikube (một node, 6 CPU) với dữ liệu Bluesky thật:
+
+| Kịch bản | Kết quả |
+|---|---|
+| Xóa pod `kafka-1` khi gửi tải `acks=all` | 35.231 message, **0 lỗi**; broker sẵn sàng lại sau 122 giây, đủ bản sao sau 179 giây |
+| Kill đột ngột pod primary PostgreSQL | Có primary mới sau **40 giây**; db-writer và metrics-writer tự kết nối lại sau 51 giây, không mất dữ liệu |
+| Khởi động lại Module 3 | 3.645 KOL được khôi phục điểm lũy kế từ PostgreSQL |
 
 Chi tiết (auto-healing, scale, KEDA theo lag, truy cập từ ngoài): [docs/kubernetes.md](docs/kubernetes.md).
 

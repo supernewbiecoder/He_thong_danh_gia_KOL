@@ -1,0 +1,75 @@
+# Daily logical backup (pg_dump) of database kol to a PVC, keeping 14 days.
+# Same script as Docker Compose (scripts/pg-backup.sh --once). Reads from a replica (kol-db-ro),
+# so the primary is not slowed down.
+#
+#   kubectl -n kol-system create job --from=cronjob/kol-db-backup kol-db-backup-now   # back up now
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: kol-db-backup
+  labels:
+    app.kubernetes.io/name: kol-db-backup
+spec:
+  schedule: "0 2 * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: kol-db-backup
+        spec:
+          restartPolicy: OnFailure
+          securityContext:
+            runAsUser: 26
+            fsGroup: 26
+          containers:
+            - name: pg-dump
+              image: ghcr.io/cloudnative-pg/postgresql:16.6
+              imagePullPolicy: IfNotPresent
+              command: ["bash", "/scripts/pg-backup.sh", "--once"]
+              env:
+                - name: PGHOST
+                  value: kol-db-ro
+                - name: PGDATABASE
+                  value: kol
+                - name: PGUSER
+                  value: kol_app
+                - name: PGPASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: kol-db-app
+                      key: password
+                - name: BACKUP_KEEP_DAYS
+                  value: "14"
+              resources:
+                requests:
+                  cpu: 50m
+                  memory: 64Mi
+                limits:
+                  memory: 512Mi
+              volumeMounts:
+                - name: scripts
+                  mountPath: /scripts
+                - name: backups
+                  mountPath: /backups
+          volumes:
+            - name: scripts
+              configMap:
+                name: postgres-backup-script
+            - name: backups
+              persistentVolumeClaim:
+                claimName: kol-db-backups
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: kol-db-backups
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 2Gi

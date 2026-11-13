@@ -34,6 +34,17 @@ spec:
               value: "false"
             - name: GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH
               value: /var/lib/grafana/dashboards/kafka-overview.json
+            # Read-only connection for the "KOL Leaderboard" dashboard (datasources/postgres.yml).
+            # kol-db-ro only reaches replicas, so dashboards never load the primary.
+            - name: KOL_DB_HOST
+              value: kol-db-ro
+            - name: KOL_DB_SSLMODE
+              value: require
+            - name: KOL_DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: kol-db-readonly
+                  key: password
           ports:
             - name: http
               containerPort: 3000
